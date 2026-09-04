@@ -1,0 +1,7 @@
+- Game title is Ember (Brasa dropped). Hex turn-based tactical, Fire Emblem-like, Portuguese. [2026-09-04]
+- Custom in-house engine only — no Godot/Unity. Sprites must be engine-agnostic PNG + simple atlas. [2026-09-04]
+- Owner rule (AGENTS.project.md): never edit repo/game without explicit chat OK. New assets shown first; approval of art ≠ hook into combat. [2026-09-04]
+- Party names seen so far: Kael, Neera, Voss, Salazar. Preview error: /game/sprites/kael/atk-1.png missing. [2026-09-04]
+- Playtest freeze: EvaristoCabrito/emberashes02. Work repo: EvaristoCabrito/EmberAshes03 (https://github.com/EvaristoCabrito/EmberAshes03). Art still sourced from 02 until 03 is filled. [2026-09-04]
+- Visual tone: dark gothic ruins, ash/gold (“Táticas em Cinzas”). Familiar is pearlescent axolotl-like; needs Ember-toned variant later. [2026-09-04]
+- Familiar sprite pack saved under artifacts/familiar_sprites/ and familiar_sprites_alpha.zip — 64 frames, 8 fps, 256/128 RGBA sheets + JSON atlas. [2026-09-04]
