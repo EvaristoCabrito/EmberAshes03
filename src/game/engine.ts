@@ -1,4 +1,4 @@
-import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, CURE_DISEASE, CURES, DECORATIONS, DISEASE, DOUBLE_STRIKE, EMPTY_BAG, EQUIPMENT, EXP_TO_LEVEL, expForHit, FIREBALL, FOOTPRINT_TYPE_7, FOOTPRINT_TYPE_8, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, MAGIC_MISSILE, MAX_LEVEL, PIERCING, PIERCING_THRUST, POTION_CARRY_MAX, POTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, WEAPON_MAX_ENH, WEAPONS, WEB_OF_DREAMS, cureSpan, decorationCells, diceFormula, effectiveMaxRange, enemyLevelFor, fireballFormula, fireballOrigin, fireballPower, fireballRangeTiles, fireballTiles, hexAreaTiles, isProjectile, lightningDice, lightningFormula, missionGearLevel, parseLayout, potionLabel, rollCure, rollDice, rollPotion, spellTier, starterWeaponFor, STARTING_BAG, statsFor, terrainNote, TERRAIN, tierKey, tierUses, gearStatBonus, offHandBlocked, weightedLootPick, weightedPotionPick, weightedWeaponPick } from "./data";
+import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, CURE_DISEASE, CURES, DECORATIONS, DISEASE, DOUBLE_STRIKE, EMPTY_BAG, EQUIPMENT, EXP_TO_LEVEL, expForHit, FIREBALL, FOOTPRINT_TYPE_7, FOOTPRINT_TYPE_8, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, MAGIC_MISSILE, magicMissileCount, MAX_LEVEL, PIERCING, PIERCING_THRUST, POTION_CARRY_MAX, POTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, WEAPON_MAX_ENH, WEAPONS, WEB_OF_DREAMS, cureSpan, decorationCells, diceFormula, effectiveMaxRange, enemyLevelFor, fireballFormula, fireballOrigin, fireballPower, fireballRangeTiles, fireballTiles, hexAreaTiles, isProjectile, lightningDice, lightningFormula, missionGearLevel, parseLayout, potionLabel, rollCure, rollDice, rollPotion, spellTier, starterWeaponFor, STARTING_BAG, statsFor, terrainNote, TERRAIN, tierKey, tierUses, gearStatBonus, offHandBlocked, weightedLootPick, weightedPotionPick, weightedWeaponPick } from "./data";
 import type { SpellTier } from "./data";
 import { canCounter, makeForecast, mulberry32, rollDamage, rollDamageCustom } from "./combat";
 import {
@@ -418,6 +418,9 @@ export class BattleEngine {
   lootEmber = 0;
   /** Weapon ids found in chests or off an enemy kill mid-battle; folded into the save's
    * weapon stash on victory. */
+  /** Targets picked so far for a multi-missile Magic Missile, one per missile. Cleared
+   * whenever aiming ends, so an abandoned cast never leaks into the next one. */
+  private missileTargets: { id: string; cell: Point }[] = [];
   lootWeapons: string[] = [];
   /** EquipmentDef ids found in chests mid-battle; folded into the save's shared gear stash
    * on victory (save.looseEquipment) — never auto-equipped onto whoever opened the chest,
@@ -1337,6 +1340,7 @@ export class BattleEngine {
     att.drawY = att.y;
     this.active = null;
     this.spellKind = null;
+    this.missileTargets = [];
     // A spell/heal/cureDisease sets this.banner directly (the cast name, e.g. "Bola de
     // Fogo") when it starts, outside the dedicated "banner" active-step type — which is
     // the only other thing that ever set it, and the only thing that ever cleared it (see
@@ -1657,6 +1661,7 @@ export class BattleEngine {
       this.spellArmed = false;
       this.spellAim = null;
       this.spellKind = null;
+    this.missileTargets = [];
       this.tip = null;
       return;
     }
@@ -1760,7 +1765,8 @@ export class BattleEngine {
     this.spellArmed = false;
     this.spellAim = null;
     this.hover = null;
-    this.tip = `${MAGIC_MISSILE.name}: alcance ${MAGIC_MISSILE.range}, ${diceFormula(MAGIC_MISSILE.dice, MAGIC_MISSILE.faces, MAGIC_MISSILE.bonus)} − RES. Acerto garantido. Toque no inimigo.`;
+    const shots = magicMissileCount(u.level);
+    this.tip = `${MAGIC_MISSILE.name}: alcance ${MAGIC_MISSILE.range}, ${diceFormula(MAGIC_MISSILE.dice, MAGIC_MISSILE.faces, u.mag)} − RES por míssil. ${shots} míssil${shots > 1 ? "eis, um alvo cada (pode repetir)" : ""}. Acerto garantido. Toque no inimigo.`;
     sfxPlay.ui();
   }
 
@@ -1814,6 +1820,7 @@ export class BattleEngine {
     }
     this.spendTier(u, "sweep");
     this.spellKind = null;
+    this.missileTargets = [];
     this.spellArmed = false;
     this.spellAim = null;
     this.tip = null;
@@ -2138,6 +2145,7 @@ export class BattleEngine {
     if (!target) return;
     this.spendTier(unit, kind);
     this.spellKind = null;
+    this.missileTargets = [];
     this.tip = null;
     this.mode = "locked";
     this.queue.push({ type: "heal", att: unit.id, def: target.id, kind });
@@ -2154,6 +2162,7 @@ export class BattleEngine {
     if (!target) return;
     this.spendTier(unit, "cureDisease");
     this.spellKind = null;
+    this.missileTargets = [];
     this.tip = null;
     this.mode = "locked";
     this.queue.push({ type: "cureDisease", att: unit.id, def: target.id });
@@ -2194,6 +2203,7 @@ export class BattleEngine {
     if (!foe) return;
     this.spendTier(unit, "longShot");
     this.spellKind = null;
+    this.missileTargets = [];
     this.tip = null;
     this.mode = "locked";
     this.queue.push({
@@ -2220,6 +2230,7 @@ export class BattleEngine {
     }
     this.spendTier(unit, "piercing");
     this.spellKind = null;
+    this.missileTargets = [];
     this.tip = null;
     this.mode = "locked";
     this.queue.push({ type: "spell", att: unit.id, tiles: line, ids, label: PIERCING.name, dmgMul: PIERCING.dmgMul, spellKind: "piercing" });
@@ -2239,6 +2250,7 @@ export class BattleEngine {
     }
     this.spendTier(unit, "piercingThrust");
     this.spellKind = null;
+    this.missileTargets = [];
     this.tip = null;
     this.mode = "locked";
     sfxPlay.thrust();
@@ -2256,6 +2268,7 @@ export class BattleEngine {
     if (!foe) return;
     this.spendTier(unit, "lightning");
     this.spellKind = null;
+    this.missileTargets = [];
     this.tip = null;
     this.mode = "locked";
     this.queue.push({
@@ -2272,6 +2285,8 @@ export class BattleEngine {
     });
   }
 
+  /** Each missile is aimed separately, so the cast collects one target per tap and only
+   * fires once they are all chosen. They may be stacked on one enemy or spread around. */
   private castMagicMissile(unit: Unit, cell: Point): void {
     if (!this.spellAimValid(unit, cell)) {
       this.tip = "Alvo fora de alcance.";
@@ -2281,21 +2296,38 @@ export class BattleEngine {
     const occ = occupancy(this.units);
     const foe = occ.get(key(cell.x, cell.y));
     if (!foe) return;
+
+    const want = magicMissileCount(unit.level);
+    this.missileTargets.push({ id: foe.id, cell: { x: cell.x, y: cell.y } });
+    if (this.missileTargets.length < want) {
+      const left = want - this.missileTargets.length;
+      this.tip = `${MAGIC_MISSILE.name} · escolha mais ${left} alvo${left > 1 ? "s" : ""} (pode repetir).`;
+      sfxPlay.ui();
+      return;
+    }
+
+    const shots = this.missileTargets;
+    this.missileTargets = [];
     this.spendTier(unit, "magicMissile");
     this.spellKind = null;
+    this.missileTargets = [];
     this.tip = null;
     this.mode = "locked";
-    this.queue.push({
-      type: "spell",
-      att: unit.id,
-      tiles: [cell],
-      ids: [foe.id],
-      dice: MAGIC_MISSILE.dice,
-      faces: MAGIC_MISSILE.faces,
-      bonus: MAGIC_MISSILE.bonus,
-      label: MAGIC_MISSILE.name,
-      spellKind: "magicMissile",
-    });
+    // One queued cast per missile: each rolls its own 3d4 and takes the target's RES off
+    // separately, which is what makes splitting them different from one big hit.
+    for (const shot of shots) {
+      this.queue.push({
+        type: "spell",
+        att: unit.id,
+        tiles: [shot.cell],
+        ids: [shot.id],
+        dice: MAGIC_MISSILE.dice,
+        faces: MAGIC_MISSILE.faces,
+        bonus: MAGIC_MISSILE.bonus + unit.mag,
+        label: MAGIC_MISSILE.name,
+        spellKind: "magicMissile",
+      });
+    }
   }
 
   private castDoubleStrike(unit: Unit, cell: Point): void {
@@ -2309,6 +2341,7 @@ export class BattleEngine {
     if (!foe) return;
     this.spendTier(unit, "doubleStrike");
     this.spellKind = null;
+    this.missileTargets = [];
     this.tip = null;
     this.mode = "locked";
     this.queue.push({ type: "combat", att: unit.id, def: foe.id, noCounter: true });
@@ -2326,6 +2359,7 @@ export class BattleEngine {
     if (!foe) return;
     this.spendTier(unit, "trip");
     this.spellKind = null;
+    this.missileTargets = [];
     this.tip = null;
     this.mode = "locked";
     this.queue.push({
@@ -2409,6 +2443,7 @@ export class BattleEngine {
     this.units.push(familiar);
     this.spendTier(unit, "summonFamiliar");
     this.spellKind = null;
+    this.missileTargets = [];
     this.emitParticle({
       x: cell.x,
       y: cell.y - 0.2,
@@ -2446,6 +2481,7 @@ export class BattleEngine {
     }
     this.spendTier(unit, "webOfDreams");
     this.spellKind = null;
+    this.missileTargets = [];
     this.emitParticle({
       x: click.x,
       y: click.y - 0.2,
@@ -2483,6 +2519,7 @@ export class BattleEngine {
     }
     this.spendTier(unit, "cleave");
     this.spellKind = null;
+    this.missileTargets = [];
     this.tip = null;
     this.mode = "locked";
     this.queue.push({
@@ -3134,6 +3171,7 @@ export class BattleEngine {
     }
     this.spendTier(unit, "fireball");
     this.spellKind = null;
+    this.missileTargets = [];
     this.tip = null;
     this.mode = "locked";
     const power = fireballPower(unit.level);
@@ -3161,6 +3199,7 @@ export class BattleEngine {
     const center = this.units.find((x) => x.alive && occupies(x, origin.x, origin.y));
     this.spendTier(unit, "causticVenom");
     this.spellKind = null;
+    this.missileTargets = [];
     this.tip = null;
     this.mode = "locked";
     this.queue.push({

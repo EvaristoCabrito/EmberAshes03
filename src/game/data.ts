@@ -1428,13 +1428,20 @@ export const CLEAVE = {
 export const MAGIC_MISSILE = {
   name: "Míssil Mágico",
   range: 4,
-  // Three darts, each 1d4+1, that never miss — modeled as one roll of 3 dice-of-4 plus a
-  // flat +3 (one dart's flat bonus × 3), which is exactly equivalent to summing three
-  // separate 1d4+1 rolls.
+  // 3d4 per missile, plus the caster's own MAG — the flat +3 it used to carry is gone, so
+  // the spell grows with the mage instead of staying where it started.
   dice: 3,
   faces: 4,
-  bonus: 3,
+  bonus: 0,
 };
+
+/** Missiles the caster gets, each aimed on its own: one to start, a second at level 3, a
+ * third at level 6. They may all go into the same enemy or be split between several. */
+export function magicMissileCount(level: number): number {
+  if (level >= 6) return 3;
+  if (level >= 3) return 2;
+  return 1;
+}
 
 /** Conjurer tier 1: summons a controllable ally at half the conjurer's current stats
  * (recomputed from the conjurer at cast time, so a later-battle or higher-level cast comes
