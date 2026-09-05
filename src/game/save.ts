@@ -1,4 +1,5 @@
-import { EQUIPMENT, EXP_TO_LEVEL, MAX_LEVEL, MISSIONS, POTION_CARRY_MAX, PROMOTIONS, WEAPONS, emberFromCompleted, starterWeaponFor, startingBags } from "./data";
+import { EQUIPMENT, EXP_TO_LEVEL, MAX_LEVEL, POTION_CARRY_MAX, PROMOTIONS, WEAPONS, emberFromCompleted, starterWeaponFor, startingBags } from "./data";
+import { ALL_MISSIONS } from "./mapstore";
 import { TIER_KEYS } from "./types";
 import type { Bag, ClassId, EquipSlot, SaveBank, SaveData, TierKey } from "./types";
 
@@ -13,7 +14,7 @@ export const DEFAULT_LEVELS: Record<string, number> = { Kael: 1, Neera: 1, Voss:
 export const DEFAULT_XP: Record<string, number> = { Kael: 0, Neera: 0, Voss: 0, Salazar: 0 };
 
 const HEROES = ["Kael", "Neera", "Voss", "Salazar"] as const;
-const MISSION_IDS = new Set(MISSIONS.map((m) => m.id));
+const MISSION_IDS = new Set(ALL_MISSIONS.map((m) => m.id));
 
 const HERO_BASE_CLASS: Record<(typeof HEROES)[number], ClassId> = {
   Kael: "swordsman",
@@ -406,13 +407,13 @@ export function formatStamp(ts: number): string {
 export function slotProgress(slot: SaveData | null): { title: string; detail: string } {
   if (!slot || !slotOccupied(slot)) return { title: "Vazio", detail: "Nenhuma campanha" };
   if (slot.pendingMission) {
-    const m = MISSIONS.find((x) => x.id === slot.pendingMission);
+    const m = ALL_MISSIONS.find((x) => x.id === slot.pendingMission);
     return { title: m ? m.title : slot.pendingMission, detail: "Início do combate" };
   }
   if (slot.completed.length === 0) return { title: "Campanha nova", detail: "Mapa de cenários" };
   const lastId = slot.completed[slot.completed.length - 1]!;
-  const last = MISSIONS.find((x) => x.id === lastId);
-  const next = MISSIONS.find((x) => last && x.index === last.index + 1);
+  const last = ALL_MISSIONS.find((x) => x.id === lastId);
+  const next = ALL_MISSIONS.find((x) => last && x.index === last.index + 1);
   if (next) return { title: next.title, detail: `Após ${last?.title ?? lastId}` };
   return { title: last?.title ?? lastId, detail: "Campanha concluída" };
 }

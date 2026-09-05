@@ -1,0 +1,102 @@
+/**
+ * Dev-only `/__map-save` endpoint: writes a Map Editor draft to a real file
+ * under `src/game/maps/`, so a map authored in the browser lands in the repo
+ * instead of only in that browser's localStorage.
+ *
+ * The file name is the map's own scenario id plus a serial — `vau-001.json`,
+ * `vau-002.json` — so a map is found again by its name, and every save appends
+ * the next serial rather than overwriting the last one (delete the newer file
+ * to roll back). `src/game/mapstore.ts` globs the folder and plays the highest
+ * serial for each id.
+ *
+ * `apply: "serve"` keeps the route out of deployed apps: it exists only while
+ * `npm run dev` is running, which is the only time there is a repo to write to.
+ */
+import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+
+export const MAP_SAVE_ROUTE = "/__map-save";
+
+/** Where saved maps live, relative to the project root. */
+export const MAPS_DIR = join("src", "game", "maps");
+
+/** A scenario id is a file name, so it may only hold characters that are safe in one —
+ * this is what stops a crafted id from writing outside the maps folder. */
+export function isSafeMapId(id) {
+  return typeof id === "string" && id.length > 0 && id.length <= 64 && /^[a-z0-9][a-z0-9-]*$/.test(id);
+}
+
+/** The next unused serial for a scenario: one past the highest `<id>-NNN.json`
+ * already on disk, so saves stack up instead of clobbering each other. */
+export function nextSerial(dir, id) {
+  let highest = 0;
+  let entries = [];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return 1;
+  }
+  const pattern = new RegExp(`^${id}-(\\d{3})\\.json$`);
+  for (const name of entries) {
+    const match = pattern.exec(name);
+    if (match) highest = Math.max(highest, Number(match[1]));
+  }
+  return highest + 1;
+}
+
+function readBody(req, limitBytes) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let total = 0;
+    req.on("data", (chunk) => {
+      total += chunk.length;
+      if (total > limitBytes) {
+        reject(new Error("map too large"));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    req.on("error", reject);
+  });
+}
+
+export function mapSavePlugin() {
+  return {
+    name: "ember:map-save",
+    apply: "serve",
+    configureServer(server) {
+      const dir = join(server.config.root, MAPS_DIR);
+      server.middlewares.use((req, res, next) => {
+        const pathOnly = (req.url ?? "").split("?", 1)[0];
+        if (pathOnly !== MAP_SAVE_ROUTE || (req.method ?? "GET").toUpperCase() !== "POST") {
+          next();
+          return;
+        }
+        const reply = (status, payload) => {
+          const body = Buffer.from(JSON.stringify(payload), "utf8");
+          res.statusCode = status;
+          res.setHeader("content-type", "application/json; charset=utf-8");
+          res.setHeader("cache-control", "no-cache");
+          res.setHeader("content-length", String(body.byteLength));
+          res.end(body);
+        };
+        readBody(req, 8 * 1024 * 1024)
+          .then((raw) => {
+            const draft = JSON.parse(raw);
+            if (!isSafeMapId(draft?.id)) {
+              reply(400, { ok: false, error: "id inválido — use letras minúsculas, números e hífens" });
+              return;
+            }
+            mkdirSync(dir, { recursive: true });
+            const serial = nextSerial(dir, draft.id);
+            const file = `${draft.id}-${String(serial).padStart(3, "0")}.json`;
+            writeFileSync(join(dir, file), JSON.stringify({ serial, savedAt: Date.now(), draft }, null, 2) + "\n", "utf8");
+            reply(200, { ok: true, serial, file: `${MAPS_DIR}/${file}` });
+          })
+          .catch((err) => reply(400, { ok: false, error: String(err?.message ?? err) }));
+      });
+    },
+  };
+}

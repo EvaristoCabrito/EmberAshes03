@@ -6,10 +6,11 @@ import { installAudioUnlock, playMenuMusic, playTheme, resumeAudio, setMuted, sf
 import { BattleCanvas } from "./BattleCanvas";
 import { InnScreen } from "./InnScreen";
 import { BackpackScreen, PaperDollScreen } from "./InventoryScreens";
-import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, CURE_DISEASE, CURES, DECORATIONS, DOUBLE_STRIKE, EQUIPMENT, EXP_TO_LEVEL, FIREBALL, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, MAGIC_MISSILE, PIERCING, PIERCING_THRUST, MAX_LEVEL, MISSIONS, POTIONS, POTION_LOOT_WEIGHT, PROMOTE_LEVEL, PROMOTED_BASE, PROMOTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, TERRAIN, TILE_CHAR, WEAPONS, WEAPON_MAX_ENH, WEB_OF_DREAMS, WORLD_LOCATIONS, BAG_MAX, LOCKPICK_PRICE, POTION_CARRY_MAX, POTION_PRICE, decorationCells, decorationImage, diceFormula, emberForKill, enemyLevelFor, equippedPouchId, fireballFormula, lightningFormula, locationForMission, missionById, missionsForLocation, parseLayout, potionLabel, pouchIcon, rangeLabel, sheetLine, spellTier, startingBags, statsFor, terrainNote, tierKey, tierUses, weaponEnhCost, weaponSellValue, type SpellTier } from "./data";
+import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, CURE_DISEASE, CURES, DECORATIONS, DOUBLE_STRIKE, EQUIPMENT, EXP_TO_LEVEL, FIREBALL, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, MAGIC_MISSILE, PIERCING, PIERCING_THRUST, MAX_LEVEL, POTIONS, POTION_LOOT_WEIGHT, PROMOTE_LEVEL, PROMOTED_BASE, PROMOTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, TERRAIN, WEAPONS, WEAPON_MAX_ENH, WEB_OF_DREAMS, BAG_MAX, LOCKPICK_PRICE, POTION_CARRY_MAX, POTION_PRICE, decorationCells, decorationImage, diceFormula, emberForKill, enemyLevelFor, equippedPouchId, fireballFormula, lightningFormula, parseLayout, potionLabel, pouchIcon, rangeLabel, sheetLine, spellTier, startingBags, statsFor, terrainNote, tierKey, tierUses, weaponEnhCost, weaponSellValue, type SpellTier } from "./data";
 import { BattleEngine } from "./engine";
 import { WorldMapScreen } from "./WorldMapScreen";
 import { DISPLAY_VERSION } from "./version";
+import { ALL_LOCATIONS, ALL_MISSIONS, draftToMission, latestSerialFor, locationForMission, mapFileName, missionById, missionsForLocation, savedVersionsFor, serialLabel, type MapDraft, type DraftSpawn } from "./mapstore";
 import {
   activeSave,
   emptySave,
@@ -23,7 +24,7 @@ import {
   writeSlot,
   selectSlot,
 } from "./save";
-import type { ClassId, DecorationPlacement, EquipSlot, GameArt, GrowthLine, HudSnapshot, Mission, PotionId, SaveBank, SaveData, ScreenId, SpellKind, Spawn, TerrainId, UnitPublic, WinCondition, WorldLocation } from "./types";
+import type { ClassId, EquipSlot, GameArt, GrowthLine, HudSnapshot, Mission, PotionId, SaveBank, SaveData, ScreenId, SpellKind, Spawn, TerrainId, UnitPublic, WinCondition, WorldLocation } from "./types";
 
 function hudBlank(): HudSnapshot {
   return {
@@ -65,10 +66,10 @@ function lockedMission(id: string, completed: string[], test: boolean): boolean 
   if (test) return false;
   const m = missionById(id);
   if (!m) return true;
-  if (m.hub) return !innUnlocked(completed) && !MISSIONS.some((x) => x.index === m.index - 1 && completed.includes(x.id));
+  if (m.hub) return !innUnlocked(completed) && !ALL_MISSIONS.some((x) => x.index === m.index - 1 && completed.includes(x.id));
   if (completed.includes(id)) return true;
   if (m.index === 0) return false;
-  const prev = MISSIONS.find((x) => x.index === m.index - 1);
+  const prev = ALL_MISSIONS.find((x) => x.index === m.index - 1);
   return prev ? !completed.includes(prev.id) : false;
 }
 
@@ -723,7 +724,7 @@ export function GameApp() {
 
       {screen === "worldMap" && (
         <WorldMapScreen
-          locations={WORLD_LOCATIONS}
+          locations={ALL_LOCATIONS}
           status={(loc) => locationStatus(loc, save.completed, testMode)}
           missionStatus={(id) => missionStatus(id, save.completed, testMode)}
           ember={testMode ? testEmber : (save.ember ?? 0)}
@@ -734,7 +735,7 @@ export function GameApp() {
             setMutedUi((v) => !v);
           }}
           autoOpenLocationId={openLocationOnMap}
-          centerLocationId={locationForMission(MISSIONS.find((m) => !m.hub && !save.completed.includes(m.id))?.id ?? "")?.id ?? null}
+          centerLocationId={locationForMission(ALL_MISSIONS.find((m) => !m.hub && !save.completed.includes(m.id))?.id ?? "")?.id ?? null}
           onBack={() => setScreen(testMode ? "testMenu" : "title")}
           onPick={openMission}
           onOpenList={() => setScreen("campaign")}
@@ -1463,39 +1464,6 @@ const MAP_ACTIVE_KEY = "ember-map-active";
 const EDITOR_COLS_DEFAULT = 10;
 const EDITOR_ROWS_DEFAULT = 8;
 
-/** A spawn as edited in the Map Editor — the real Spawn shape plus a per-spawn test
- * level, which only exists for "Testar" (balance testing). It never leaves the editor:
- * draftToMission() strips it back down to a plain Spawn before export/playtest. */
-interface DraftSpawn extends Spawn {
-  level: number;
-}
-
-interface MapDraft {
-  /** Which campaign scenario this map authors for — matches a real Mission.id (e.g.
-   * "o-vau") to version-edit that scenario, or any free id for a standalone map with no
-   * campaign slot. Versions are grouped and saved under this id — it's the "Cenário
-   * alvo" the user assigns, not a per-edit-session unique key. */
-  id: string;
-  /** Mission.index of the scenario being edited (enemy scaling, procedural terrain hash
-   * — see enemyLevelFor). 0 for a standalone map with no real campaign slot. */
-  index: number;
-  title: string;
-  place: string;
-  briefing: string;
-  objective: string;
-  win: WinCondition;
-  hub: boolean;
-  cols: number;
-  rows: number;
-  tiles: TerrainId[];
-  /** Art variant per tile (same indexing as tiles) — which numbered version (01, 02, ...)
-   * paints there. Defaults to 0 (the "01" file, safe for existing missions). */
-  tileVariants: number[];
-  decorations: DecorationPlacement[];
-  playerSpawns: DraftSpawn[];
-  enemySpawns: DraftSpawn[];
-}
-
 /** Default level for a newly added spawn: enough spell slots unlocked to actually test
  * with, without being maxed out. */
 const DEFAULT_TEST_LEVEL = 10;
@@ -1510,6 +1478,7 @@ function blankDraft(): MapDraft {
     objective: "Derrote todos os inimigos",
     win: "rout",
     hub: false,
+    locationId: "",
     cols: EDITOR_COLS_DEFAULT,
     rows: EDITOR_ROWS_DEFAULT,
     tiles: Array.from({ length: EDITOR_COLS_DEFAULT * EDITOR_ROWS_DEFAULT }, () => "plains" as TerrainId),
@@ -1536,6 +1505,7 @@ function missionToDraft(m: Mission): MapDraft {
     objective: m.objective,
     win: m.win,
     hub: !!m.hub,
+    locationId: locationForMission(m.id)?.id ?? "",
     cols: m.cols,
     rows: m.rows,
     tiles: parseLayout(m.layout),
@@ -1573,11 +1543,33 @@ function loadVersionStore(): Record<string, MapVersion[]> {
   }
 }
 
-function saveVersionStore(store: Record<string, MapVersion[]>) {
+/** Returns false when the browser refused the write (private mode, blocked storage,
+ * quota) so the caller can say so instead of reporting a save that didn't happen. */
+function saveVersionStore(store: Record<string, MapVersion[]>): boolean {
   try {
     window.localStorage.setItem(MAP_VERSIONS_KEY, JSON.stringify(store));
+    return true;
   } catch {
-    // ignore — editor still works in-session without persistence
+    return false;
+  }
+}
+
+/** Writes the draft to src/game/maps/<id>-<serial>.json through the dev server's
+ * /__map-save route (scripts/map-save-plugin.mjs). Only reachable while `npm run dev`
+ * is running — a built/deployed app has no repo to write to, and falls back to the
+ * browser-local store below. */
+async function saveMapToRepo(draft: MapDraft): Promise<{ ok: true; serial: number; file: string } | { ok: false; error: string }> {
+  try {
+    const res = await fetch("/__map-save", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(draft),
+    });
+    const body = (await res.json()) as { ok?: boolean; serial?: number; file?: string; error?: string };
+    if (!res.ok || !body.ok) return { ok: false, error: body.error ?? `HTTP ${res.status}` };
+    return { ok: true, serial: body.serial ?? 0, file: body.file ?? "" };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
 
@@ -1597,32 +1589,6 @@ function saveActiveVersions(map: Record<string, number>) {
   } catch {
     // ignore
   }
-}
-
-function draftToMission(d: MapDraft): Mission {
-  const layout: string[] = [];
-  for (let r = 0; r < d.rows; r++) {
-    let row = "";
-    for (let c = 0; c < d.cols; c++) row += TILE_CHAR[d.tiles[r * d.cols + c] ?? "plains"];
-    layout.push(row);
-  }
-  return {
-    id: d.id,
-    index: d.index,
-    title: d.title,
-    place: d.place,
-    briefing: d.briefing,
-    objective: d.objective,
-    win: d.win,
-    cols: d.cols,
-    rows: d.rows,
-    layout,
-    tileVariants: d.tileVariants.some((v) => v) ? d.tileVariants : undefined,
-    decorations: d.decorations.length > 0 ? d.decorations : undefined,
-    playerSpawns: d.playerSpawns.map(({ level: _level, ...s }) => s),
-    enemySpawns: d.enemySpawns.map(({ level: _level, ...s }) => s),
-    hub: d.hub || undefined,
-  };
 }
 
 /** Resolves a mission id for REAL play (not the editor's own playtest): an activated
@@ -1712,6 +1678,8 @@ function MapEditorScreen({
   const [note, setNote] = useState<string | null>(null);
 
   const versions = versionStore[draft.id] ?? [];
+  const repoFiles = savedVersionsFor(draft.id);
+  const repoLatest = latestSerialFor(draft.id);
   const activeSerial = activeVersions[draft.id];
 
   const decoLookup = useMemo(() => {
@@ -1847,17 +1815,31 @@ function MapEditorScreen({
     });
   };
 
-  const doSave = () => {
+  /** Saves the map as a file in the repo — src/game/maps/<id>-<serial>.json — and keeps
+   * a browser-local copy as the fallback for when the dev server isn't there to write
+   * one (a built app, a deployed preview). Whichever path ran is what the note says: a
+   * save that didn't happen never reports success. */
+  const doSave = async () => {
     const list = versionStore[draft.id] ?? [];
-    const serial = (list[list.length - 1]?.serial ?? 0) + 1;
-    const next = { ...versionStore, [draft.id]: [...list, { serial, draft, savedAt: Date.now() }] };
+    const localSerial = (list[list.length - 1]?.serial ?? 0) + 1;
+    const next = { ...versionStore, [draft.id]: [...list, { serial: localSerial, draft, savedAt: Date.now() }] };
     setVersionStore(next);
-    saveVersionStore(next);
-    setNote(`Salvo como v${serial} de "${draft.id}". Use Ativar pra valer pra campanha.`);
+    const localOk = saveVersionStore(next);
+
+    const repo = await saveMapToRepo(draft);
+    if (repo.ok) {
+      setNote(`Salvo em ${repo.file} — recarregue pra ver "${draft.title}" no jogo.`);
+      return;
+    }
+    if (localOk) {
+      setNote(`Sem servidor de dev: salvo só neste navegador como ${serialLabel(localSerial)} de "${draft.id}" (${repo.error}). Use Ativar pra valer pra campanha.`);
+      return;
+    }
+    setNote(`NÃO SALVOU: nem arquivo (${repo.error}) nem navegador. O mapa só existe nesta tela — exporte antes de sair.`);
   };
 
   const doExport = () => {
-    doSave();
+    void doSave();
     setExportText(JSON.stringify(draftToMission(draft), null, 2));
     setCopyOk(false);
   };
@@ -1915,7 +1897,7 @@ function MapEditorScreen({
             }}
           >
             <option value="">Carregar da campanha…</option>
-            {MISSIONS.filter((m) => !m.hub).map((m) => (
+            {ALL_MISSIONS.filter((m) => !m.hub).map((m) => (
               <option key={m.id} value={m.id}>
                 {m.title}
               </option>
@@ -1997,6 +1979,22 @@ function MapEditorScreen({
             >
               <option value="rout">Derrote todos (rout)</option>
               <option value="boss">Derrube o chefe (boss)</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-muted text-xs uppercase tracking-wide">Local no mapa-múndi</span>
+            <select
+              className="bg-bg border border-border rounded-md px-2 py-1.5"
+              value={draft.locationId}
+              onChange={(e) => setDraft((d) => ({ ...d, locationId: e.target.value }))}
+            >
+              <option value="">Nenhum — não aparece no mapa</option>
+              {ALL_LOCATIONS.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.name}
+                  {l.missionIds.length === 0 ? " (vazio)" : ` (${l.missionIds.length})`}
+                </option>
+              ))}
             </select>
           </label>
           <label className="flex items-center gap-2 mt-5">
@@ -2268,6 +2266,33 @@ function MapEditorScreen({
 
         <div className="flex flex-col gap-1.5">
           <p className="text-xs uppercase tracking-wide text-muted">
+            Arquivos de "{draft.id}" no repositório ({repoFiles.length})
+          </p>
+          {repoFiles.length === 0 ? (
+            <p className="text-xs text-muted">Nenhum — Salvar grava src/game/maps/{mapFileName(draft.id, 1)}.</p>
+          ) : (
+            <div className="flex flex-col gap-1">
+              {repoFiles
+                .slice()
+                .reverse()
+                .map((f) => (
+                  <div key={f.serial} className="flex items-center gap-1.5 text-xs bg-bg border border-border rounded-md px-2 py-1.5">
+                    <span className={`font-bold tabular-nums ${f.serial === repoLatest ? "text-accent" : ""}`}>{serialLabel(f.serial)}</span>
+                    <span className="text-muted flex-1 min-w-0 truncate">
+                      {mapFileName(draft.id, f.serial)}
+                      {f.serial === repoLatest ? " · é essa que o jogo carrega" : ""}
+                    </span>
+                    <Button size="sm" variant="quiet" onClick={() => setDraft(f.draft)}>
+                      Carregar
+                    </Button>
+                  </div>
+                ))}
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <p className="text-xs uppercase tracking-wide text-muted">
             Versões salvas de "{draft.id}" ({versions.length})
           </p>
           {versions.length === 0 ? (
@@ -2327,7 +2352,7 @@ function MapEditorScreen({
           Testar
         </Button>
         <div className="flex gap-2">
-          <Button variant="ghost" className="flex-1" onClick={doSave}>
+          <Button variant="ghost" className="flex-1" onClick={() => void doSave()}>
             Salvar
           </Button>
           <Button variant="ghost" className="flex-1" onClick={doExport}>
@@ -2356,7 +2381,7 @@ function MapEditorScreen({
 }
 
 function CampaignScreen({
-  missions = MISSIONS,
+  missions = ALL_MISSIONS,
   completed,
   test,
   ember,
@@ -2417,7 +2442,7 @@ function BriefingScreen({
   onBack,
   onStart,
 }: {
-  mission: (typeof MISSIONS)[number];
+  mission: (typeof ALL_MISSIONS)[number];
   onBack: () => void;
   onStart: () => void;
 }) {

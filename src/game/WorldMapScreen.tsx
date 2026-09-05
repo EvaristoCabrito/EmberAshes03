@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { Check, ChevronLeft, Lock, MapPin, Volume2, VolumeX, X, ZoomIn, ZoomOut } from "lucide-react";
-import { missionsForLocation } from "./data";
+import { missionsForLocation } from "./mapstore";
 import type { Mission, WorldLocation } from "./types";
 
 export type LocationStatus = "locked" | "available" | "done";
