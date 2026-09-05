@@ -1565,6 +1565,16 @@ const DEFAULT_HEROES: { name: string; classId: ClassId }[] = [
   { name: "Salazar", classId: "healer" },
 ];
 
+/** Everyone the Map Editor can drop on a board. Two more than DEFAULT_HEROES, which is the
+ * starting four the campaign and the inn are built around — the Lancer and the Conjurer are
+ * party members too, and a map being authored should be able to place them. Kept separate
+ * so widening the editor's reach does not quietly recruit them into a campaign. */
+const EDITOR_HEROES: { name: string; classId: ClassId }[] = [
+  ...DEFAULT_HEROES,
+  { name: "Aldric", classId: "lancer" },
+  { name: "Malrec", classId: "conjurer" },
+];
+
 /** One saved edit of a scenario. Versions never get overwritten — every "Salvar" appends
  * a new serial under the draft's id (the target scenario). "Ativar" a serial to make it
  * the one real campaign play uses instead of the immutable static Mission data; the
@@ -1929,23 +1939,34 @@ function MapEditorScreen({
     setDraft((d) => ({ ...d, [side]: d[side].filter((_, idx) => idx !== i) }));
   };
 
-  const addDefaultHeroes = () => {
-    setDraft((d) => {
-      const occupied = new Set([...d.playerSpawns, ...d.enemySpawns].map((s) => `${s.x},${s.y}`));
-      const already = new Set(d.playerSpawns.map((s) => s.name));
-      const added: DraftSpawn[] = [];
-      let x = 0;
-      const y = d.rows - 1;
-      for (const h of DEFAULT_HEROES) {
-        if (already.has(h.name)) continue;
-        while (x < d.cols && occupied.has(`${x},${y}`)) x++;
-        if (x >= d.cols) break;
-        added.push({ name: h.name, classId: h.classId, x, y, level: DEFAULT_TEST_LEVEL });
-        occupied.add(`${x},${y}`);
-        x++;
+  /** Drops one hero or the whole party on the bottom row. Worked out from the current draft
+   * rather than inside the state updater: React runs that when it pleases, so counting
+   * there reported on placements that had not happened yet. */
+  const addHeroes = (who: { name: string; classId: ClassId }[]) => {
+    const occupied = new Set([...draft.playerSpawns, ...draft.enemySpawns].map((s) => `${s.x},${s.y}`));
+    const already = new Set(draft.playerSpawns.map((s) => s.name));
+    const added: DraftSpawn[] = [];
+    const skipped: string[] = [];
+    let x = 0;
+    const y = draft.rows - 1;
+    for (const h of who) {
+      if (already.has(h.name)) {
+        skipped.push(h.name);
+        continue;
       }
-      return { ...d, playerSpawns: [...d.playerSpawns, ...added] };
-    });
+      while (x < draft.cols && occupied.has(`${x},${y}`)) x++;
+      if (x >= draft.cols) break;
+      added.push({ name: h.name, classId: h.classId, x, y, level: DEFAULT_TEST_LEVEL });
+      occupied.add(`${x},${y}`);
+      x++;
+    }
+    if (added.length > 0) setDraft((d) => ({ ...d, playerSpawns: [...d.playerSpawns, ...added] }));
+    const put = added.map((a) => a.name).join(", ");
+    if (added.length > 0) {
+      setNote(skipped.length > 0 ? `${put} na linha de baixo (${skipped.join(", ")} já estava lá).` : `${put} na linha de baixo.`);
+    } else {
+      setNote(`${who.map((h) => h.name).join(", ")} já ${who.length > 1 ? "estavam" : "estava"} no mapa.`);
+    }
   };
 
   /** Saves the map as a file in the repo — src/game/maps/<id>-<serial>.json — and keeps
@@ -2040,7 +2061,10 @@ function MapEditorScreen({
               // Everything the campaign lays over a map on load — scatter, rocks, chests
               // and decoration — aimed at the map in hand: fill the board with something to
               // react to, then clear what does not belong.
-              const filled = dressMap(draftToMission({ ...draft, autoTactics: true }));
+              // Generate replaces, it does not pile on: the decoration pass appends to what
+              // it is handed, so without clearing first a second press stacked scenery on
+              // top of the last lot.
+              const filled = dressMap(draftToMission({ ...draft, autoTactics: true, decorations: [] }));
               const tiles = parseLayout(filled.layout);
               const decorations = filled.decorations ?? [];
               setDraft((d) => ({
@@ -2276,10 +2300,21 @@ function MapEditorScreen({
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" onClick={addDefaultHeroes}>
-            Adicionar Kael, Neera, Voss, Salazar
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={() => addHeroes(EDITOR_HEROES)}>
+            Party completa
           </Button>
+          {EDITOR_HEROES.map((h) => (
+            <Button
+              key={h.name}
+              variant="ghost"
+              size="sm"
+              title={CLASSES[h.classId].name}
+              onClick={() => addHeroes([h])}
+            >
+              {h.name}
+            </Button>
+          ))}
           <p className="text-xs text-muted ml-auto">Nível de cada um é editável na lista abaixo.</p>
         </div>
 

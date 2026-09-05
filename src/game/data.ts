@@ -2510,7 +2510,10 @@ export function scatterTactics(m: Mission): Mission {
   // to roughly 224-352 cells. Run unscaled on a smaller board they crowd it — a raw 10x8
   // got the same two walls in a quarter of the space — so they follow the area instead.
   const density = (m.cols * m.rows) / 288;
-  const wantWalls = Math.max(1, Math.round(2 * density));
+  // One wall per campaign-sized board, not two: barricades are the most intrusive thing
+  // the scatter places, and a map reads better when they are an occasional feature
+  // rather than the defining one.
+  const wantWalls = Math.max(1, Math.round(density));
   walls.sort((a, b) => b.score - a.score);
   let placed = 0;
   for (const wall of walls) {
@@ -2731,7 +2734,18 @@ function placeChests(
     const scoreB = minDist(b, playerSpawns) - minDist(b, enemySpawns);
     return scoreB - scoreA;
   });
-  const pool = candidates.slice(0, Math.max(1, Math.ceil(candidates.length / 2)));
+  // Distance from the party was only ever a preference in the sort above, so on a tight
+  // board a chest could still land in the heroes' laps — worth nothing to reach and free to
+  // grab. Anything nearer than this is out; if that leaves nowhere, the preference order
+  // decides as before rather than the map going without.
+  // Measured in hexes, not the Chebyshev that minDist uses above: on an offset grid those
+  // disagree, and a Chebyshev 4 can be three hexes' walk — close enough to still be free.
+  const CHEST_MIN_HERO_DIST = 4;
+  const heroHexes = (c: Cell) =>
+    playerSpawns.length ? Math.min(...playerSpawns.map((sp) => oddrDist(c[0], c[1], sp[0], sp[1]))) : Infinity;
+  const farEnough = candidates.filter((c) => heroHexes(c) >= CHEST_MIN_HERO_DIST);
+  const usable = farEnough.length > 0 ? farEnough : candidates;
+  const pool = usable.slice(0, Math.max(1, Math.ceil(usable.length / 2)));
   for (let i = pool.length - 1; i > 0; i--) {
     const j = Math.floor(rng() * (i + 1));
     [pool[i], pool[j]] = [pool[j]!, pool[i]!];
@@ -2804,12 +2818,75 @@ function applyDeadGround(mission: Mission): Mission {
   return { ...mission, tileVariants: variants };
 }
 
+/** Scatters scenery — ridges, dead trees, ruined cottages, boulder clusters — over open
+ * ground.
+ *
+ * Nothing did this before. The fifteen props in DECORATIONS only ever reached a map through
+ * rockifyColumns, which converts hand-authored column pairs, so a generated board got none
+ * of them; the only decoration it produced was the marker sitting on a chest.
+ *
+ * Props are solid over their whole footprint, so each is placed only where that footprint
+ * is clear, kept off the spawns, and rolled back if it would cut the map in two. Unlike the
+ * rest of the dressing this uses real randomness, so pressing the button again gives a
+ * different board instead of repeating the last one. */
+export function scatterDecor(m: Mission): Mission {
+  const tiles = parseLayout(m.layout);
+  const walkableTile = (t: TerrainId | undefined) => !!t && TERRAIN[t].passable;
+  const taken = new Set<string>(decorationCells(m.decorations ?? []));
+  for (const sp of [...m.playerSpawns, ...m.enemySpawns]) {
+    taken.add(`${sp.x},${sp.y}`);
+    for (const [nx, ny] of hexAdj(sp.x, sp.y)) taken.add(`${nx},${ny}`);
+  }
+
+  const reaches = (extra: Set<string>) => {
+    const from = m.playerSpawns[0];
+    const to = m.enemySpawns[0];
+    if (!from || !to) return true;
+    const seen = new Set([`${from.x},${from.y}`]);
+    const q = [{ x: from.x, y: from.y }];
+    while (q.length) {
+      const p = q.pop()!;
+      if (oddrDist(p.x, p.y, to.x, to.y) <= 1) return true;
+      for (const [nx, ny] of hexAdj(p.x, p.y)) {
+        if (nx < 0 || ny < 0 || nx >= m.cols || ny >= m.rows) continue;
+        const k = `${nx},${ny}`;
+        if (seen.has(k) || extra.has(k) || !walkableTile(tiles[ny * m.cols + nx])) continue;
+        seen.add(k);
+        q.push({ x: nx, y: ny });
+      }
+    }
+    return false;
+  };
+
+  const ids = Object.keys(DECORATIONS);
+  const want = Math.max(2, Math.round(((m.cols * m.rows) / 288) * 7));
+  const placed: DecorationPlacement[] = [...(m.decorations ?? [])];
+
+  for (let tries = 0, done = 0; tries < want * 40 && done < want; tries++) {
+    const id = ids[Math.floor(Math.random() * ids.length)]!;
+    const def = DECORATIONS[id]!;
+    const ax = Math.floor(Math.random() * m.cols);
+    const ay = Math.floor(Math.random() * m.rows);
+    const cells = def.footprint.map(({ dx, dy }) => ({ x: ax + dx, y: ay + dy }));
+    if (cells.some((c) => c.x < 0 || c.y < 0 || c.x >= m.cols || c.y >= m.rows)) continue;
+    if (cells.some((c) => taken.has(`${c.x},${c.y}`) || !walkableTile(tiles[c.y * m.cols + c.x]))) continue;
+    const keys = new Set(cells.map((c) => `${c.x},${c.y}`));
+    if (!reaches(new Set([...taken, ...keys]))) continue;
+    placed.push({ id, x: ax, y: ay });
+    for (const k of keys) taken.add(k);
+    // A ring of clearance, so props read as separate features instead of one clump.
+    for (const c of cells) for (const [nx, ny] of hexAdj(c.x, c.y)) taken.add(`${nx},${ny}`);
+    done++;
+  }
+  return { ...m, decorations: placed };
+}
+
 /** Everything the campaign lays over a map on load, in the order it runs: the tactical
  * scatter, then columns rocked into props, then the open-ground pass that adds chests and
  * decoration. The Map Editor's "Gerar terreno" calls this so the board it fills matches
  * what a real mission would look like, rather than only the first of the three. */
 export function dressMap(m: Mission): Mission {
-  return decorateOpenTerrain(rockifyColumns(scatterTactics(m)));
+  return scatterDecor(decorateOpenTerrain(rockifyColumns(scatterTactics(m))));
 }
 
 export const MISSIONS: Mission[] = expandMaps(RAW_MISSIONS).map(rockifyColumns).map(decorateOpenTerrain).map(applyDeadGround);
