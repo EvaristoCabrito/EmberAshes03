@@ -2814,26 +2814,24 @@ export function missionById(id: string): Mission | undefined {
  * permanently locked until missions are written for them — "we'll open up more as we make
  * more missions." */
 export const WORLD_LOCATIONS: WorldLocation[] = [
-  { id: "stonebridge", name: "Stone Bridge", x: 14, y: 71, missionIds: ["vau", "bosque", "aldeia"] },
-  { id: "ruins", name: "Ruins", x: 8, y: 56, missionIds: ["muralha", "fortaleza", "templo", "cripta"] },
-  { id: "estalagem", name: "Inn", x: 48, y: 39, missionIds: ["estalagem"] },
-  { id: "dungeon", name: "Dungeon", x: 60, y: 64, missionIds: ["colina", "passagem", "profundezas"] },
-  // Locked (empty missionIds) on purpose — R1/R2 aren't ready for a real pass yet, see the
-  // doc comment above.
-  { id: "vertente", name: "Fortified Temple Complex", x: 78, y: 7, missionIds: [] },
-  // Named on the map, not yet assigned to any mission — visible on the map (permanently
-  // locked) as a preview of the world until content is written for them.
-  { id: "village", name: "Village", x: 17, y: 27, missionIds: [] },
-  { id: "farm", name: "Farm", x: 89, y: 46, missionIds: [] },
-  { id: "ruins2", name: "Ruins", x: 12, y: 43, missionIds: [] },
-  { id: "cemetery", name: "Cemetery", x: 46, y: 69, missionIds: [] },
-  { id: "frozen-swamp", name: "Frozen Swamp", x: 20, y: 86, missionIds: [] },
-  { id: "forest", name: "Forest", x: 85, y: 79, missionIds: [] },
-  { id: "misty-cave", name: "Misty Cave", x: 63, y: 19, missionIds: [] },
-  // Reserved for the second Ferreiro (higher-tier gear, once the current one's stock is
-  // split into a low/high tier pair) — locked like every other undeveloped location until
-  // missions and that second shop actually exist.
-  { id: "city", name: "City", x: 35, y: 50, missionIds: [] },
+  // Pinned to the art at public/game/assets/world-map.jpg, on the drawn feature rather than
+  // on its label. Coordinates are percentages of the image, so they survive the art being
+  // reshaped (it went from 768x1376 to a 1408 square) — the image renders at its natural
+  // aspect and the markers ride along.
+  { id: "stonebridge", name: "Stone Bridge", x: 14, y: 62, missionIds: ["vau", "aldeia"] },
+  { id: "ruins", name: "Ruins", x: 79, y: 23, missionIds: ["muralha", "fortaleza", "templo", "cripta"] },
+  { id: "estalagem", name: "Inn", x: 50, y: 53, missionIds: ["estalagem"] },
+  { id: "dungeon", name: "The Sunken Ruins", x: 12, y: 78, missionIds: ["colina", "passagem", "profundezas"] },
+  { id: "watchtower", name: "Watchtower", x: 24, y: 50, missionIds: ["bosque"] },
+  // Locked until content exists for them — the art draws them either way, so the world
+  // reads as a place with more in it than the campaign has reached.
+  { id: "vertente", name: "Fortified Temple Complex", x: 52, y: 9, missionIds: [] },
+  { id: "village", name: "Village", x: 22, y: 25, missionIds: [] },
+  { id: "farm", name: "Farm", x: 14, y: 38, missionIds: [] },
+  { id: "misty-cave", name: "Misty Cave", x: 51, y: 37, missionIds: [] },
+  { id: "cemetery", name: "Cemetery", x: 86, y: 52, missionIds: [] },
+  { id: "frozen-swamp", name: "Frozen Swamp", x: 48, y: 78, missionIds: [] },
+  { id: "forest", name: "The Verdant Refuge", x: 84, y: 80, missionIds: [] },
 ];
 
 export function locationForMission(missionId: string): WorldLocation | undefined {

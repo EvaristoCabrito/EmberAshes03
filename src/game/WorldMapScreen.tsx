@@ -9,7 +9,10 @@ export type LocationStatus = "locked" | "available" | "done";
  * zoomed-out to most zoomed-in. The map opens at the LAST (biggest) stop — that's as
  * close as it should ever get — and the zoom control only zooms OUT from there to show
  * more of the surrounding map, never further in. */
-const ZOOM_STOPS = [90, 110, 130];
+// Percentages of the viewport width the map image is drawn at. 70 is there so the whole
+// map fits on screen at once: the art is square now (it used to be tall and narrow), so
+// what used to be the widest view no longer showed all of it.
+const ZOOM_STOPS = [70, 90, 110, 130];
 
 /** Campaign world map: one marker per WorldLocation, positioned by its x/y percent over
  * the map art. A single-mission location jumps straight to its briefing on click; a
@@ -308,7 +311,12 @@ export function WorldMapScreen({
           >
             <ZoomIn className="size-5" />
           </button>
-          <div className="text-center text-[10px] tabular-nums text-muted py-0.5">{zoomIdx + 1}/{ZOOM_STOPS.length}</div>
+          {/* Counted from the wide end: 4 is the whole map on screen, 1 is closest in.
+              ZOOM_STOPS itself stays in ascending width order, which is what the buttons
+              step through — this is only how the step is labelled. */}
+          <div className="text-center text-[10px] tabular-nums text-muted py-0.5">
+            {ZOOM_STOPS.length - zoomIdx}/{ZOOM_STOPS.length}
+          </div>
           <button
             type="button"
             onClick={() => {
