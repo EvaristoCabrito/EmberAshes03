@@ -1836,6 +1836,22 @@ function MapEditorScreen({
   }, [draft.decorations]);
 
   const setTile = (i: number, t: TerrainId) => {
+    // Painting under a prop is allowed, but it is worth saying out loud: the prop is only
+    // the picture, so repainting here is what decides whether that house can be climbed.
+    const x = i % draft.cols;
+    const y = Math.floor(i / draft.cols);
+    const under = draft.decorations.find((p) => {
+      const def = DECORATIONS[p.id];
+      return def?.tile && def.footprint.some((f) => p.x + f.dx === x && p.y + f.dy === y);
+    });
+    if (under) {
+      const def = DECORATIONS[under.id]!;
+      if (t !== def.tile) {
+        setNote(
+          `${def.name} agora está sobre ${TERRAIN[t].name.toLowerCase()} — ${TERRAIN[t].passable ? "dá pra andar por cima" : "não se atravessa"}. O terreno manda, não o desenho.`,
+        );
+      }
+    }
     setDraft((d) => {
       const tiles = d.tiles.slice();
       const tileVariants = d.tileVariants.slice();
@@ -1874,7 +1890,21 @@ function MapEditorScreen({
         const def = DECORATIONS[p.id];
         return def?.footprint.some((f) => p.x + f.dx === x && p.y + f.dy === y);
       });
-      if (hit) return { ...d, decorations: d.decorations.filter((p) => p !== hit) };
+      // A decoration is art; the tile under it carries every rule. So the tile is laid with
+      // the prop and lifted with it, and the two cannot drift apart: a house prop over
+      // plains would look climbable and be flat ground.
+      const floor: TerrainId = d.tiles.includes("nave") ? "nave" : "plains";
+      if (hit) {
+        const hitDef = DECORATIONS[hit.id];
+        const tiles = [...d.tiles];
+        if (hitDef?.tile) {
+          for (const f of hitDef.footprint) {
+            const i = (hit.y + f.dy) * d.cols + (hit.x + f.dx);
+            if (tiles[i] === hitDef.tile) tiles[i] = floor;
+          }
+        }
+        return { ...d, tiles, decorations: d.decorations.filter((p) => p !== hit) };
+      }
       const def = DECORATIONS[decoBrush];
       if (!def) return d;
       // refuse to place if any covered cell is out of bounds or already taken
@@ -1884,14 +1914,29 @@ function MapEditorScreen({
         if (cx < 0 || cy < 0 || cx >= d.cols || cy >= d.rows) return d;
         if (covered.has(`${cx},${cy}`)) return d;
       }
-      return { ...d, decorations: [...d.decorations, { id: decoBrush, x, y }] };
+      const tiles = [...d.tiles];
+      if (def.tile) {
+        for (const f of def.footprint) tiles[(y + f.dy) * d.cols + (x + f.dx)] = def.tile;
+      }
+      return { ...d, tiles, decorations: [...d.decorations, { id: decoBrush, x, y }] };
+      
     });
   };
 
   const onCellClick = (x: number, y: number) => {
     const i = y * draft.cols + x;
     if (mode === "paint") setTile(i, brush);
-    else if (mode === "decoration") toggleDecoration(x, y);
+    else if (mode === "decoration") {
+      const def = DECORATIONS[decoBrush];
+      const existing = draft.decorations.some((p) => {
+        const d2 = DECORATIONS[p.id];
+        return d2?.footprint.some((f) => p.x + f.dx === x && p.y + f.dy === y);
+      });
+      if (!existing && def?.tile) {
+        setNote(`${def.name} sobre ${TERRAIN[def.tile].name.toLowerCase()} — ${TERRAIN[def.tile].passable ? "dá pra subir em cima" : "não se atravessa"}.`);
+      }
+      toggleDecoration(x, y);
+    }
     else toggleSpawn(x, y);
   };
 

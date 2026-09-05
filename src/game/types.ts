@@ -158,6 +158,14 @@ export interface DecorationDef {
   /** Hex offsets from the anchor cell (dx/dy in board coordinates, same convention as
    * Unit.footprintOffsets — {dx:1,dy:0} is always the same-row neighbor). */
   footprint: { dx: number; dy: number }[];
+  /** The terrain this prop means, if it means one.
+   *
+   * Decorations are art: every rule — whether a hex can be walked, shot through or stood
+   * on top of — comes from the tile underneath, which is why the rocks that rockifyColumns
+   * draws leave their column tile in place. A house you can climb is a house prop sitting
+   * on "highruin". Naming it here lets the editor lay the tile with the prop, so the
+   * picture and the rules cannot drift apart. */
+  tile?: TerrainId;
 }
 
 /** A decoration placed on a mission's map, anchored at (x,y). */
