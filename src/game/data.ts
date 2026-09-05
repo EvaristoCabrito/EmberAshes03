@@ -2406,6 +2406,7 @@ function expandMaps(missions: Mission[]): Mission[] {
       layout,
       playerSpawns: m.playerSpawns.map(place),
       enemySpawns: m.enemySpawns.map(place),
+      neutralSpawns: m.neutralSpawns?.map(place),
     };
     // The scatter is a helper, not a law: a map that placed its own terrain opts out and
     // loads exactly as authored.
@@ -2440,7 +2441,7 @@ export function scatterTactics(m: Mission): Mission {
   const tiles = parseLayout(m.layout);
   const blocked = new Set<string>();
   const mark = (x: number, y: number) => blocked.add(`${x},${y}`);
-  for (const s of [...m.playerSpawns, ...m.enemySpawns]) {
+  for (const s of [...m.playerSpawns, ...m.enemySpawns, ...(m.neutralSpawns ?? [])]) {
     mark(s.x, s.y);
     for (const [nx, ny] of hexAdj(s.x, s.y)) mark(nx, ny);
   }

@@ -29,7 +29,14 @@ export const TIER_KEYS = ["tier1", "tier2", "tier3", "tier4", "tier5", "tier6", 
 export type TierKey = (typeof TIER_KEYS)[number];
 
 export type TerrainId = "plains" | "woods" | "ruins" | "water" | "ember" | "hill" | "flame" | "column" | "nave" | "barricade" | "highwood" | "highruin" | "chest" | "door" | "deadtree" | "void";
-export type Side = "player" | "enemy";
+/** Which faction a unit fights for.
+ *
+ * "neutral" is the wild-beast side: it holds its ground (never enters the turn order, so it
+ * takes no turn and the AI never runs for it), it is not what a "clear the map" victory
+ * counts, and it can still be attacked by the player. Striking one wakes every living
+ * neutral of that same class on the map — the whole species turns "enemy" at once (see
+ * BattleEngine.provoke) and starts acting from the following round. Nothing turns back. */
+export type Side = "player" | "enemy" | "neutral";
 export type ClassId =
   | "swordsman"
   | "archer"
@@ -195,6 +202,9 @@ export interface Mission {
   layout: string[];
   playerSpawns: Spawn[];
   enemySpawns: Spawn[];
+  /** Wild things that start on no side. Optional: a mission without any is every mission
+   * shipped before neutrals existed, and reads as an empty list. */
+  neutralSpawns?: Spawn[];
   hub?: boolean;
   /** Whether stampTactics dresses this map — the pass that scatters barricades, hills and
    * the high-terrain variants over it after the layout is doubled. On unless a map says

@@ -376,6 +376,18 @@ function spawnUnit(spawn: Mission["playerSpawns"][number], side: Unit["side"], i
   };
 }
 
+/** Whether a unit gets its own turn. Neutrals hold their ground: they are placed, they can
+ * be attacked, and they do nothing until something wakes them (see BattleEngine.provoke). */
+function takesTurns(u: Unit): boolean {
+  return u.alive && u.side !== "neutral";
+}
+
+/** Whether the player may swing at this unit. Enemies always; wild neutrals too — that is
+ * how a beast gets provoked in the first place. */
+function attackableByPlayer(u: Unit): boolean {
+  return u.alive && (u.side === "enemy" || u.side === "neutral");
+}
+
 function easeOut(t: number): number {
   return 1 - (1 - t) * (1 - t);
 }
@@ -500,12 +512,13 @@ export class BattleEngine {
     this.units = [
       ...mission.playerSpawns.map((s, i) => spawnUnit(s, "player", i, roster)),
       ...mission.enemySpawns.map((s, i) => spawnUnit(s, "enemy", i, roster, enemyLevelFor(mission.index))),
+      ...(mission.neutralSpawns ?? []).map((s, i) => spawnUnit(s, "neutral", i, roster, enemyLevelFor(mission.index))),
     ];
     for (const u of this.units) {
       this.nudgeOffHazard(u);
       u.bob = this.rng() * 16;
     }
-    this.turnOrder = this.sortByInitiative(this.units.filter((u) => u.alive));
+    this.turnOrder = this.sortByInitiative(this.units.filter(takesTurns));
     const first = this.units.find((u) => u.side === "player");
     if (first) this.cursor = { x: first.x, y: first.y };
     this.tip =
@@ -550,7 +563,7 @@ export class BattleEngine {
     const terr = hoverCell ? TERRAIN[tileAt(this.tiles, this.cols, hoverCell.x, hoverCell.y)] : null;
     const inspected = this.units.find((u) => u.id === this.inspectedId) ?? null;
     const pendingFoe = this.units.find((u) => u.id === this.pendingFoeId) ?? null;
-    const foeForForecast = pendingFoe ?? (inspected && inspected.side === "enemy" ? inspected : null);
+    const foeForForecast = pendingFoe ?? (inspected && attackableByPlayer(inspected) ? inspected : null);
     let forecast: Forecast | null = null;
     if (selected && foeForForecast && selected.side === "player") {
       const from = this.attackFrom.get(foeForForecast.id);
@@ -938,6 +951,7 @@ export class BattleEngine {
         }
         target.hp = Math.max(0, target.hp - hit.dmg);
         target.flash = 1;
+        this.provoke(target, actor);
         // Only the original attacker's own strike earns XP — a successful counter deals
         // damage but grants none, or a unit that gets ganged up on levels for free just by
         // standing there and countering every hit.
@@ -1103,6 +1117,7 @@ export class BattleEngine {
         }
         foe.hp = Math.max(0, foe.hp - dmg);
         foe.flash = 1;
+        this.provoke(foe, att);
         if (a.poison) foe.poisoned = true;
         // AoE/line abilities (fireball, cleave, piercing...) run this once per unit actually
         // hit, so every landed hit grants its own XP — piercing can also clip an ally in the
@@ -1583,6 +1598,21 @@ export class BattleEngine {
     }
   }
 
+  /** A player strike on a wild neutral wakes the whole species: every living neutral of the
+   * same class turns "enemy" at once. They are not in this round's turn order, so they rouse
+   * and start acting from the next round. Nothing turns a woken beast back. */
+  private provoke(target: Unit, attacker: Unit): void {
+    if (target.side !== "neutral" || attacker.side !== "player") return;
+    const pack = this.units.filter((u) => u.alive && u.side === "neutral" && u.classId === target.classId);
+    for (const u of pack) u.side = "enemy";
+    this.pushLog(
+      pack.length > 1
+        ? `${target.name} reage — e todo o bando de ${CLASSES[target.classId].name.toLowerCase()} vem junto (${pack.length}).`
+        : `${target.name} se volta contra vocês.`,
+    );
+    this.evaluateEnd();
+  }
+
   private evaluateEnd(): void {
     if (this.result) return;
     const p = this.units.some((u) => u.side === "player" && u.alive && !u.summoned);
@@ -2044,19 +2074,19 @@ export class BattleEngine {
     if (this.spellKind === "longShot") {
       const d = manhattan(caster, cell);
       const here = occupancy(this.units).get(key(cell.x, cell.y));
-      if (!here || !here.alive || here.side !== "enemy" || d < caster.minRange || d > this.longMax(caster)) return false;
+      if (!here || !attackableByPlayer(here) || d < caster.minRange || d > this.longMax(caster)) return false;
       return clearShot(caster, cell, this.tiles, this.cols, "arrow");
     }
     if (this.spellKind === "piercing") return this.piercingRay(caster, cell) !== null;
     if (this.spellKind === "piercingThrust") return this.piercingThrustRay(caster, cell) !== null;
     if (this.spellKind === "lightning") {
       const here = occupancy(this.units).get(key(cell.x, cell.y));
-      if (!here || !here.alive || here.side !== "enemy" || manhattan(caster, cell) > LIGHTNING.range) return false;
+      if (!here || !attackableByPlayer(here) || manhattan(caster, cell) > LIGHTNING.range) return false;
       return clearShot(caster, cell, this.tiles, this.cols, "bolt");
     }
     if (this.spellKind === "magicMissile") {
       const here = occupancy(this.units).get(key(cell.x, cell.y));
-      if (!here || !here.alive || here.side !== "enemy" || manhattan(caster, cell) > MAGIC_MISSILE.range) return false;
+      if (!here || !attackableByPlayer(here) || manhattan(caster, cell) > MAGIC_MISSILE.range) return false;
       return clearShot(caster, cell, this.tiles, this.cols, "bolt");
     }
     if (this.spellKind === "summonFamiliar") {
@@ -2837,7 +2867,9 @@ export class BattleEngine {
 
   /** Dispatches control for whoever is next in this round's initiative order. */
   private beginUnitTurn(u: Unit): void {
-    this.phase = u.side;
+    // takesTurns keeps neutrals out of the turn order, so whoever reaches here is on one of
+    // the two sides that actually take turns.
+    this.phase = u.side === "player" ? "player" : "enemy";
     u.moveBudgetUsed = 0;
     this.startOfTurnEffects(u);
     if (!u.alive) {
@@ -2910,7 +2942,10 @@ export class BattleEngine {
     }
     for (const z of this.webZones) z.roundsLeft -= 1;
     this.webZones = this.webZones.filter((z) => z.roundsLeft > 0);
-    this.turnOrder = this.sortByInitiative(this.units.filter((u) => u.alive));
+    // Neutrals are left out, so they never get a turn and the AI never runs for them. One
+    // provoked mid-round isn't in this round's order either: it wakes up and acts from the
+    // next round, which reads as the beast rousing rather than instantly retaliating.
+    this.turnOrder = this.sortByInitiative(this.units.filter(takesTurns));
     this.turn += 1;
     this.activeUnitId = null;
   }
@@ -3050,7 +3085,7 @@ export class BattleEngine {
       this.select(here);
       return;
     }
-    if (here && here.side === "enemy" && here.alive) {
+    if (here && attackableByPlayer(here)) {
       if (selected && !selected.acted && this.mode === "awaitOffHand") {
         if (canHitFrom(selected, selected, here, this.tiles, this.cols)) {
           this.commitOffHandAction(selected, here, { x: selected.x, y: selected.y });
@@ -3878,7 +3913,7 @@ export class BattleEngine {
       if (u.flash > 0) ctx.filter = `brightness(${1.8 + u.flash})`;
       if (img) ctx.drawImage(img, -w / 2, -h, w, h);
       else {
-        ctx.fillStyle = u.side === "player" ? "#8a97a1" : "#a35a4a";
+        ctx.fillStyle = u.side === "player" ? "#8a97a1" : u.side === "neutral" ? "#5f8a58" : "#a35a4a";
         ctx.fillRect(-w / 2, -h, w, h);
       }
       ctx.filter = "none";
@@ -3893,7 +3928,9 @@ export class BattleEngine {
         ctx.fillRect(bx - 1, by - 1, bw + 2, bh + 2);
         ctx.fillStyle = "#2c2824";
         ctx.fillRect(bx, by, bw, bh);
-        ctx.fillStyle = u.side === "player" ? "#c8c4bc" : "#b54a32";
+        // Green for wild neutrals, so a beast that isn't hunting you doesn't read as an
+        // enemy — it turns red on its own the moment it is provoked and joins that side.
+        ctx.fillStyle = u.side === "player" ? "#c8c4bc" : u.side === "neutral" ? "#5f9e52" : "#b54a32";
         ctx.fillRect(bx, by, bw * Math.max(0, u.hp / u.maxHp), bh);
         if (cell >= 32) {
           ctx.font = `600 ${Math.round(cell * 0.22)}px Figtree, sans-serif`;

@@ -59,6 +59,9 @@ export interface MapDraft {
   decorations: DecorationPlacement[];
   playerSpawns: DraftSpawn[];
   enemySpawns: DraftSpawn[];
+  /** Wild things on no side. Optional: map files saved before neutrals existed have no such
+   * key, and every reader has to treat a missing list as an empty one. */
+  neutralSpawns?: DraftSpawn[];
 }
 
 /** One saved map file. `serial` matches the number in the file name. */
@@ -90,6 +93,7 @@ export function draftToMission(d: MapDraft): Mission {
     decorations: d.decorations.length > 0 ? d.decorations : undefined,
     playerSpawns: d.playerSpawns.map(({ level: _level, ...s }) => s),
     enemySpawns: d.enemySpawns.map(({ level: _level, ...s }) => s),
+    neutralSpawns: d.neutralSpawns?.length ? d.neutralSpawns.map(({ level: _level, ...s }) => s) : undefined,
     hub: d.hub || undefined,
     autoTactics: d.autoTactics ? undefined : false,
   };

@@ -1542,6 +1542,7 @@ function blankDraft(): MapDraft {
     decorations: [],
     playerSpawns: [],
     enemySpawns: [],
+    neutralSpawns: [],
   };
 }
 
@@ -1549,6 +1550,14 @@ function blankDraft(): MapDraft {
  * so saved versions stack up under it and "Ativar" can make one of them live for that
  * real campaign slot. The immutable static Mission data itself is never touched; this
  * only ever writes to the versioned localStorage store. */
+/** The three spawn lists a draft carries, and the Side each one spawns into. */
+type SpawnKey = "playerSpawns" | "enemySpawns" | "neutralSpawns";
+const SPAWN_SIDE: Record<SpawnKey, "player" | "enemy" | "neutral"> = {
+  playerSpawns: "player",
+  enemySpawns: "enemy",
+  neutralSpawns: "neutral",
+};
+
 function missionToDraft(m: Mission): MapDraft {
   const n = m.cols * m.rows;
   const variants = m.tileVariants ?? [];
@@ -1570,6 +1579,7 @@ function missionToDraft(m: Mission): MapDraft {
     decorations: m.decorations ?? [],
     playerSpawns: m.playerSpawns.map((s) => ({ ...s, level: DEFAULT_TEST_LEVEL })),
     enemySpawns: m.enemySpawns.map((s) => ({ ...s, level: enemyLevelFor(m.index) })),
+    neutralSpawns: (m.neutralSpawns ?? []).map((s) => ({ ...s, level: enemyLevelFor(m.index) })),
   };
 }
 
@@ -1580,19 +1590,38 @@ const DEFAULT_HEROES: { name: string; classId: ClassId }[] = [
   { name: "Salazar", classId: "healer" },
 ];
 
-/** Everyone the Map Editor can drop on a board. Two more than DEFAULT_HEROES, which is the
- * starting four the campaign and the inn are built around — the Lancer and the Conjurer are
- * party members too, and a map being authored should be able to place them. Kept separate
- * so widening the editor's reach does not quietly recruit them into a campaign. */
-/** The editor's spawn lists, in display order. A spawn's class decides which group it lands
- * in, so a summon is listed as one wherever it was placed from. */
-const SPAWN_GROUPS: { side: "playerSpawns" | "enemySpawns"; summon: boolean; label: string }[] = [
+/** The editor's spawn lists, in display order. A spawn's class decides whether it is listed
+ * as a summon, so a summon is grouped as one wherever it was placed from. */
+/** Every spawn list, in the order a cell is searched for whoever stands on it. */
+const SPAWN_KEYS: SpawnKey[] = ["playerSpawns", "enemySpawns", "neutralSpawns"];
+
+/** The grid letter's colour, by side: blue ally, green neutral, red enemy. */
+const SIDE_INK: Record<"player" | "enemy" | "neutral", string> = {
+  player: "text-sky-300",
+  neutral: "text-emerald-400",
+  enemy: "text-red-400",
+};
+
+/** P hero, E enemy, S summon (either side), N wild neutral — the colour says the side, the
+ * letter says what it is. */
+function spawnGlyph(sp: DraftSpawn, side: "player" | "enemy" | "neutral"): string {
+  if (isSummonClass(sp.classId)) return "S";
+  return side === "player" ? "P" : side === "neutral" ? "N" : "E";
+}
+
+const SPAWN_GROUPS: { side: SpawnKey; summon: boolean; label: string }[] = [
   { side: "playerSpawns", summon: false, label: "Heróis" },
   { side: "playerSpawns", summon: true, label: "Invocações aliadas" },
   { side: "enemySpawns", summon: false, label: "Inimigos" },
   { side: "enemySpawns", summon: true, label: "Invocações inimigas" },
+  { side: "neutralSpawns", summon: false, label: "Feras neutras" },
+  { side: "neutralSpawns", summon: true, label: "Invocações neutras" },
 ];
 
+/** Everyone the Map Editor can drop on a board. Two more than DEFAULT_HEROES, which is the
+ * starting four the campaign and the inn are built around — the Lancer and the Conjurer are
+ * party members too, and a map being authored should be able to place them. Kept separate
+ * so widening the editor's reach does not quietly recruit them into a campaign. */
 const EDITOR_HEROES: { name: string; classId: ClassId }[] = [
   ...DEFAULT_HEROES,
   { name: "Aldric", classId: "lancer" },
@@ -1760,9 +1789,9 @@ function MapEditorScreen({
   // the heroes — the class itself says which of the two a spawn is (isSummonClass), so
   // there is no third list to keep in sync and no saved map to migrate.
   const [summonBrush, setSummonBrush] = useState<ClassId>(SUMMON_CLASSES[0] ?? "familiar");
-  // Summons exist on both sides — the Conjurer's familiar, and whatever an enemy caster
-  // brings up. The brush drops into whichever side this points at.
-  const [summonSide, setSummonSide] = useState<"player" | "enemy">("player");
+  // Summons exist on every side — the Conjurer's familiar, whatever an enemy caster brings
+  // up, and wild things that belong to nobody. The brush drops into whichever this points at.
+  const [summonSide, setSummonSide] = useState<"player" | "enemy" | "neutral">("player");
   const [gridStyle, setGridStyle] = useState<"hex" | "square">("hex");
   const [exportText, setExportText] = useState<string | null>(null);
   const [copyOk, setCopyOk] = useState(false);
@@ -1898,9 +1927,17 @@ function MapEditorScreen({
       // spawn is a summon (isSummonClass), so there is no third list to keep in sync and no
       // saved map to migrate. Either brush on a side lifts whatever unit is on the cell, so
       // clicking a familiar with the Herói brush removes the familiar rather than no-opping.
-      const enemySide = mode === "enemy" || (mode === "summon" && summonSide === "enemy");
-      const key: "playerSpawns" | "enemySpawns" = enemySide ? "enemySpawns" : "playerSpawns";
-      const list = d[key];
+      const key: SpawnKey =
+        mode === "enemy"
+          ? "enemySpawns"
+          : mode === "summon"
+            ? summonSide === "enemy"
+              ? "enemySpawns"
+              : summonSide === "neutral"
+                ? "neutralSpawns"
+                : "playerSpawns"
+            : "playerSpawns";
+      const list = d[key] ?? [];
       const existing = list.findIndex((s) => s.x === x && s.y === y);
       if (existing >= 0) {
         return { ...d, [key]: list.filter((_, i) => i !== existing) };
@@ -1914,7 +1951,7 @@ function MapEditorScreen({
               classId: summonBrush,
               x,
               y,
-              level: enemySide ? enemyLevelFor(0) : DEFAULT_TEST_LEVEL,
+              level: key === "playerSpawns" ? DEFAULT_TEST_LEVEL : enemyLevelFor(0),
             }
           : mode === "player"
             ? { name: `Herói ${plain + 1}`, classId: "swordsman", x, y, level: DEFAULT_TEST_LEVEL }
@@ -2010,27 +2047,28 @@ function MapEditorScreen({
         decorations,
         playerSpawns: d.playerSpawns.filter(inBounds),
         enemySpawns: d.enemySpawns.filter(inBounds),
+        neutralSpawns: (d.neutralSpawns ?? []).filter(inBounds),
       };
     });
   };
 
-  const updateSpawn = (side: "playerSpawns" | "enemySpawns", i: number, patch: Partial<DraftSpawn>) => {
+  const updateSpawn = (side: SpawnKey, i: number, patch: Partial<DraftSpawn>) => {
     setDraft((d) => {
-      const list = d[side].slice();
+      const list = (d[side] ?? []).slice();
       list[i] = { ...list[i]!, ...patch };
       return { ...d, [side]: list };
     });
   };
 
-  const removeSpawn = (side: "playerSpawns" | "enemySpawns", i: number) => {
-    setDraft((d) => ({ ...d, [side]: d[side].filter((_, idx) => idx !== i) }));
+  const removeSpawn = (side: SpawnKey, i: number) => {
+    setDraft((d) => ({ ...d, [side]: (d[side] ?? []).filter((_, idx) => idx !== i) }));
   };
 
   /** Drops one hero or the whole party on the bottom row. Worked out from the current draft
    * rather than inside the state updater: React runs that when it pleases, so counting
    * there reported on placements that had not happened yet. */
   const addHeroes = (who: { name: string; classId: ClassId }[]) => {
-    const occupied = new Set([...draft.playerSpawns, ...draft.enemySpawns].map((s) => `${s.x},${s.y}`));
+    const occupied = new Set(SPAWN_KEYS.flatMap((k) => draft[k] ?? []).map((s) => `${s.x},${s.y}`));
     const already = new Set(draft.playerSpawns.map((s) => s.name));
     const added: DraftSpawn[] = [];
     const skipped: string[] = [];
@@ -2112,12 +2150,21 @@ function MapEditorScreen({
 
   const classOptions = Object.keys(CLASSES) as ClassId[];
 
-  /** Cell tooltip for a spawn: the name, its class, and — for a summon — that it is one, so
-   * the "S" on the grid reads without having to hunt for it in the lists below. */
-  const spawnHint = (sp: DraftSpawn) =>
-    isSummonClass(sp.classId)
-      ? `${sp.name} · ${CLASSES[sp.classId].name} (invocação)`
-      : `${sp.name} · ${CLASSES[sp.classId].name}`;
+  /** Whatever unit stands on a cell, across all three spawn lists. */
+  const spawnAt = (x: number, y: number) => {
+    for (const key of SPAWN_KEYS) {
+      const sp = (draft[key] ?? []).find((s) => s.x === x && s.y === y);
+      if (sp) return { sp, side: SPAWN_SIDE[key], key };
+    }
+    return null;
+  };
+
+  /** Cell tooltip: the name, the class, and what the letter on the cell means. */
+  const spawnHint = (sp: DraftSpawn, side: "player" | "enemy" | "neutral") => {
+    const what = isSummonClass(sp.classId) ? "invocação" : side === "neutral" ? "fera neutra" : side === "enemy" ? "inimigo" : "herói";
+    const where = side === "player" ? "aliada" : side === "enemy" ? "inimiga" : "neutra";
+    return `${sp.name} · ${CLASSES[sp.classId].name} · ${isSummonClass(sp.classId) ? `${what} ${where}` : what}`;
+  };
 
   return (
     <section className="h-dvh min-h-0 flex flex-col bg-bg">
@@ -2485,14 +2532,22 @@ function MapEditorScreen({
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-xs uppercase tracking-wide text-muted">Lado</span>
               <div className="flex rounded-md overflow-hidden border border-border text-xs">
-                {(["player", "enemy"] as const).map((sd) => (
+                {(["player", "neutral", "enemy"] as const).map((sd) => (
                   <button
                     key={sd}
                     type="button"
                     onClick={() => setSummonSide(sd)}
-                    className={`px-2.5 py-1.5 ${summonSide === sd ? (sd === "enemy" ? "bg-danger text-bg" : "bg-accent text-bg") : "bg-bg text-muted"}`}
+                    className={`px-2.5 py-1.5 ${
+                      summonSide === sd
+                        ? sd === "enemy"
+                          ? "bg-danger text-bg"
+                          : sd === "neutral"
+                            ? "bg-emerald-500 text-bg"
+                            : "bg-accent text-bg"
+                        : "bg-bg text-muted"
+                    }`}
                   >
-                    {sd === "player" ? "Aliada" : "Inimiga"}
+                    {sd === "player" ? "Aliada" : sd === "neutral" ? "Neutra" : "Inimiga"}
                   </button>
                 ))}
               </div>
@@ -2510,9 +2565,16 @@ function MapEditorScreen({
               </select>
             </div>
             <p className="text-xs text-muted">
-              Clique numa casa vazia pra pôr {CLASSES[summonBrush].name.toLowerCase()} {summonSide === "enemy" ? "do lado inimigo" : "do lado aliado"};
-              clique numa casa ocupada desse lado pra remover. Invocações aliadas não contam na derrota — perder todas
-              não perde a missão. Invocações inimigas contam pra limpar o mapa, como qualquer inimigo.
+              Clique numa casa vazia pra pôr {CLASSES[summonBrush].name.toLowerCase()}{" "}
+              {summonSide === "enemy" ? "do lado inimigo" : summonSide === "neutral" ? "como fera neutra" : "do lado aliado"};
+              clique numa casa ocupada desse lado pra remover.
+            </p>
+            <p className="text-xs text-muted">
+              {summonSide === "player"
+                ? "Aliadas não contam na derrota — perder todas não perde a missão."
+                : summonSide === "enemy"
+                  ? "Inimigas contam pra limpar o mapa, como qualquer inimigo."
+                  : "Neutras ficam paradas: não entram na ordem de turno e não contam pra limpar o mapa. Atacar uma acorda o bando inteiro da mesma classe, que vira inimigo e passa a agir na rodada seguinte. Não tem volta."}
             </p>
           </div>
         )}
@@ -2529,22 +2591,19 @@ function MapEditorScreen({
               {draft.tiles.map((t, i) => {
                 const x = i % draft.cols;
                 const y = Math.floor(i / draft.cols);
-                const p = draft.playerSpawns.find((s) => s.x === x && s.y === y);
-                const e = draft.enemySpawns.find((s) => s.x === x && s.y === y);
+                const occ = spawnAt(x, y);
                 const deco = decoLookup.get(`${x},${y}`);
                 return (
                   <button
                     key={i}
                     type="button"
-                    title={p ? spawnHint(p) : e ? spawnHint(e) : (deco ?? terrainHint(t, draft.tileVariants[i] ?? 0))}
+                    title={occ ? spawnHint(occ.sp, occ.side) : (deco ?? terrainHint(t, draft.tileVariants[i] ?? 0))}
                     onClick={() => onCellClick(x, y)}
                     className={`size-[22px] grid place-items-center text-[9px] font-bold ${deco ? "outline outline-2 outline-offset-[-2px] outline-amber-400/80" : ""}`}
                     style={{ background: TERRAIN_SWATCH[t] }}
                   >
-                    {p ? (
-                      <span className={isSummonClass(p.classId) ? "text-violet-300" : "text-sky-300"}>{isSummonClass(p.classId) ? "S" : "P"}</span>
-                    ) : e ? (
-                      <span className={isSummonClass(e.classId) ? "text-fuchsia-400" : "text-red-400"}>{isSummonClass(e.classId) ? "S" : "E"}</span>
+                    {occ ? (
+                      <span className={SIDE_INK[occ.side]}>{spawnGlyph(occ.sp, occ.side)}</span>
                     ) : deco ? (
                       <span className="text-amber-300">D</span>
                     ) : null}
@@ -2565,8 +2624,7 @@ function MapEditorScreen({
                   {draft.tiles.map((t, i) => {
                     const x = i % draft.cols;
                     const y = Math.floor(i / draft.cols);
-                    const p = draft.playerSpawns.find((s) => s.x === x && s.y === y);
-                    const e = draft.enemySpawns.find((s) => s.x === x && s.y === y);
+                    const occ = spawnAt(x, y);
                     const deco = decoLookup.get(`${x},${y}`);
                     const cx = HR * SQRT3 * (x + 0.5 * (y & 1) + 0.5);
                     const cy = HR * (1.5 * y + 1);
@@ -2574,7 +2632,7 @@ function MapEditorScreen({
                       <button
                         key={i}
                         type="button"
-                        title={p ? spawnHint(p) : e ? spawnHint(e) : (deco ?? terrainHint(t, draft.tileVariants[i] ?? 0))}
+                        title={occ ? spawnHint(occ.sp, occ.side) : (deco ?? terrainHint(t, draft.tileVariants[i] ?? 0))}
                         onClick={() => onCellClick(x, y)}
                         className={`absolute grid place-items-center text-[8px] font-bold border ${deco ? "border-amber-400" : "border-black/20"}`}
                         style={{
@@ -2586,10 +2644,8 @@ function MapEditorScreen({
                           clipPath: "polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)",
                         }}
                       >
-                        {p ? (
-                      <span className={isSummonClass(p.classId) ? "text-violet-300" : "text-sky-300"}>{isSummonClass(p.classId) ? "S" : "P"}</span>
-                    ) : e ? (
-                      <span className={isSummonClass(e.classId) ? "text-fuchsia-400" : "text-red-400"}>{isSummonClass(e.classId) ? "S" : "E"}</span>
+                        {occ ? (
+                      <span className={SIDE_INK[occ.side]}>{spawnGlyph(occ.sp, occ.side)}</span>
                     ) : deco ? (
                       <span className="text-amber-300">D</span>
                     ) : null}
@@ -2629,7 +2685,7 @@ function MapEditorScreen({
             updateSpawn/removeSpawn address the underlying list, not the filtered view. */}
         {SPAWN_GROUPS.map((group) => {
           const side = group.side;
-          const rows = draft[side].map((sp, i) => ({ sp, i })).filter(({ sp }) => isSummonClass(sp.classId) === group.summon);
+          const rows = (draft[side] ?? []).map((sp, i) => ({ sp, i })).filter(({ sp }) => isSummonClass(sp.classId) === group.summon);
           if (rows.length === 0) return null;
           return (
           <div key={`${side}-${group.summon}`} className="flex flex-col gap-1.5">
@@ -2766,7 +2822,11 @@ function MapEditorScreen({
           className="w-full"
           onClick={() => {
             const playerLevels = Object.fromEntries(draft.playerSpawns.map((s) => [s.name, s.level]));
-            const enemyLevels = Object.fromEntries(draft.enemySpawns.map((s) => [s.name, s.level]));
+            // Neutrals level off the same table as enemies — one of them may well end up
+            // fighting as one before the mission is over.
+            const enemyLevels = Object.fromEntries(
+              [...draft.enemySpawns, ...(draft.neutralSpawns ?? [])].map((s) => [s.name, s.level]),
+            );
             setNote("Testando — Encerrar teste nas Opções traz o mapa de volta como está.");
             onPlaytest(draftToMission(draft), playerLevels, enemyLevels);
           }}
