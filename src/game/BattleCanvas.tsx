@@ -6,14 +6,16 @@ export function BattleCanvas({
   engine,
   onHud,
   paused = false,
-  onHoldTile,
+  onTileReadout,
 }: {
   engine: BattleEngine;
   onHud: (hud: HudSnapshot) => void;
   paused?: boolean;
-  /** Fires while a press is held still on one tile, so the caller can show what that
-   * terrain does. Called with false as soon as the press moves off or lifts. */
-  onHoldTile?: (held: boolean) => void;
+  /** Fires when the pointer has settled on one tile long enough to be asking about it, so
+   * the caller can show what that terrain does. With a mouse that is the cursor resting
+   * still; on touch, where there is no hover, it is a press held in place. Called with
+   * false as soon as the pointer moves off, lifts, or leaves the canvas. */
+  onTileReadout?: (showing: boolean) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -48,18 +50,18 @@ export function BattleCanvas({
       }
       if (holding) {
         holding = false;
-        onHoldTile?.(false);
+        onTileReadout?.(false);
       }
     };
-    const armHold = (px: number, py: number) => {
+    const armReadout = (px: number, py: number, delay: number) => {
       cancelHold();
       if (paused) return;
       holdTimer = window.setTimeout(() => {
         holdTimer = null;
         holding = true;
-        engine.pointerMove(px, py); // point the hover at the held tile so the HUD describes it
-        onHoldTile?.(true);
-      }, 420);
+        engine.pointerMove(px, py); // point the hover at that tile so the HUD describes it
+        onTileReadout?.(true);
+      }, delay);
     };
     let pinchDist = 0;
     let pinched = false;
@@ -156,7 +158,6 @@ export function BattleCanvas({
         lastY = e.clientY;
         canvas.setPointerCapture(e.pointerId);
         canvas.style.cursor = "grabbing";
-        armHold(p.x, p.y);
         return;
       }
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -173,7 +174,7 @@ export function BattleCanvas({
       dragged = false;
       lastX = e.clientX;
       lastY = e.clientY;
-      armHold(p.x, p.y);
+      armReadout(p.x, p.y, 420);
       if (engine.getHud().mode === "awaitSpell") {
         engine.pointerMove(p.x, p.y);
       }
@@ -194,6 +195,9 @@ export function BattleCanvas({
       }
       const p = pos(e);
       const spell = engine.getHud().mode === "awaitSpell";
+      // Resting the cursor on a tile asks about it. Every movement restarts the clock, so
+      // this only fires once the pointer actually stops — no button involved.
+      if (e.pointerType === "mouse" && !mouseDown) armReadout(p.x, p.y, 650);
       if (e.pointerType === "mouse" && mouseDown) {
         const dx = e.clientX - lastX;
         const dy = e.clientY - lastY;
@@ -312,6 +316,7 @@ export function BattleCanvas({
     canvas.addEventListener("pointermove", onMove);
     canvas.addEventListener("pointerup", onUp);
     canvas.addEventListener("pointercancel", onUp);
+    canvas.addEventListener("pointerleave", cancelHold);
     canvas.addEventListener("wheel", onWheel, { passive: false });
     canvas.addEventListener("contextmenu", onMenu);
     window.addEventListener("keydown", onKey);
@@ -325,6 +330,7 @@ export function BattleCanvas({
       canvas.removeEventListener("pointerdown", onDown);
       canvas.removeEventListener("pointermove", onMove);
       canvas.removeEventListener("pointerup", onUp);
+      canvas.removeEventListener("pointerleave", cancelHold);
       canvas.removeEventListener("pointercancel", onUp);
       canvas.removeEventListener("wheel", onWheel);
       canvas.removeEventListener("contextmenu", onMenu);

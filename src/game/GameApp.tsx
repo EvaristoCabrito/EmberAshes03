@@ -2603,8 +2603,9 @@ function BattleScreen({
   const [showLog, setShowLog] = useState(false);
   const logRef = useRef<HTMLDivElement | null>(null);
   const [invView, setInvView] = useState<"doll" | "pack" | null>(null);
-  // Press and hold a tile to read what its terrain does — the same numbers the map editor
-  // shows on hover, which the player had no way to see during a fight.
+  // Rest the pointer on a tile (or, on touch, hold a press) to read what its terrain does
+  // — the same numbers the map editor shows on hover, which the player had no way to see
+  // during a fight.
   const [heldTile, setHeldTile] = useState(false);
   const [hotbars, setHotbars] = useState<Record<string, (SlotAction | null)[]>>({});
   const [editingSlots, setEditingSlots] = useState(false);
@@ -2770,7 +2771,7 @@ function BattleScreen({
   return (
     <section className="relative h-dvh min-h-0 flex flex-col bg-bg">
       <div className="relative flex-1 min-h-0">
-        <BattleCanvas engine={engine} onHud={onHud} paused={paused} onHoldTile={setHeldTile} />
+        <BattleCanvas engine={engine} onHud={onHud} paused={paused} onTileReadout={setHeldTile} />
         {hud.turnQueue.length > 1 && (
           <div className="pointer-events-none absolute inset-x-2 top-[max(0.5rem,env(safe-area-inset-top))] flex items-center gap-1 flex-wrap">
             <p className="bg-surface/90 border border-border rounded-md px-2 py-0.5 text-[15px] leading-tight flex items-center gap-1.5 flex-wrap">
