@@ -83,10 +83,22 @@ export async function loadGameArt(): Promise<GameArt> {
       sprites[id] = await Promise.all(Array.from({ length: n }, (_, i) => loadImage(`/game/sprites/${id}/${i + 1}.png${cacheBust}`)));
     }),
   );
+  // Attack cuts, per sprite: how many atk-*.png frames are on disk, and the cache-bust the
+  // set was last republished under. attackPose spreads whatever count it finds across the
+  // lunge/hit/recover stages, so a set only has to be listed here to animate.
+  const ATTACK_FRAMES: Partial<Record<SpriteId, { n: number; bust: string }>> = {
+    kael: { n: 12, bust: "?v=2" },
+    nira: { n: 4, bust: "" },
+    voss: { n: 4, bust: "" },
+    salazar: { n: 4, bust: "" },
+    malrec: { n: 4, bust: "" },
+    aldric: { n: 4, bust: "" },
+    familiar: { n: 8, bust: "?v=6" },
+  };
   await Promise.all(
-    (["kael", "nira", "voss", "salazar", "malrec", "aldric"] as SpriteId[]).map(async (id) => {
-      const n = id === "kael" ? 12 : 4;
-      attacks[id] = await Promise.all(Array.from({ length: n }, (_, i) => loadImage(`/game/sprites/${id}/atk-${i + 1}.png${id === "kael" ? "?v=2" : ""}`)));
+    (Object.keys(ATTACK_FRAMES) as SpriteId[]).map(async (id) => {
+      const { n, bust } = ATTACK_FRAMES[id]!;
+      attacks[id] = await Promise.all(Array.from({ length: n }, (_, i) => loadImage(`/game/sprites/${id}/atk-${i + 1}.png${bust}`)));
     }),
   );
   const impact = await Promise.all([1, 2, 3, 4].map((n) => loadImage(`/game/fx/impact-${n}.png`)));

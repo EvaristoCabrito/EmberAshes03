@@ -2759,7 +2759,12 @@ export class BattleEngine {
     const i = target.y * this.cols + target.x;
     const wasChest = this.tiles[i] === "chest";
     this.tiles[i] = this.visualFloorAt(target.x, target.y);
-    this.decorations = this.decorations.filter((d) => !(d.id === "locked-chest" && d.x === target.x && d.y === target.y));
+    // decorations is readonly (the renderer holds the same array), so drop the chest's
+    // decoration in place rather than rebinding the field.
+    for (let d = this.decorations.length - 1; d >= 0; d--) {
+      const dec = this.decorations[d];
+      if (dec.id === "locked-chest" && dec.x === target.x && dec.y === target.y) this.decorations.splice(d, 1);
+    }
     u.bag.lockpick -= 1;
     u.x = Math.round(u.drawX);
     u.y = Math.round(u.drawY);
@@ -3511,17 +3516,26 @@ export class BattleEngine {
         if (a.stage === "recover" || a.stage === "counterRecover") return Math.min(11, 9 + Math.floor((a.t / 0.16) * 3));
         return 11;
       }
-      if (a.stage === "lunge" || a.stage === "counterLunge") return a.t < 0.1 ? 0 : 1;
-      if (a.stage === "hit" || a.stage === "counterHit") return 2;
-      if (a.stage === "recover" || a.stage === "counterRecover") return 3;
-      return 3;
+      // Short sets: the classic cut is one frame per stage (0-1 lunge, 2 hit, 3 recover).
+      // Anything between 5 and 11 frames — the familiar's 8 — walks the same three stages
+      // across every frame it has instead of stopping at index 3 and wasting the rest.
+      const lungeEnd = Math.max(1, Math.round((n - 1) * 0.35));
+      const hitEnd = Math.max(lungeEnd + 1, Math.round((n - 1) * 0.6));
+      const span = (from: number, to: number, prog: number) =>
+        Math.min(to, from + Math.floor(Math.max(0, Math.min(0.999, prog)) * (to - from + 1)));
+      if (a.stage === "lunge" || a.stage === "counterLunge") return span(0, lungeEnd, a.t / 0.2);
+      if (a.stage === "hit" || a.stage === "counterHit") return span(lungeEnd + 1, hitEnd, a.t / 0.18);
+      if (a.stage === "recover" || a.stage === "counterRecover") return span(hitEnd + 1, n - 1, a.t / 0.16);
+      return n - 1;
     }
     if ((a.type === "spell" || a.type === "heal") && a.att === u.id) {
-      if (long) return Math.min(n - 1, Math.floor(Math.min(0.99, a.t / 0.4) * n));
-      if (a.t < 0.12) return 0;
-      if (a.t < 0.22) return 1;
-      if (a.t < 0.4) return 2;
-      return 3;
+      if (n === 4) {
+        if (a.t < 0.12) return 0;
+        if (a.t < 0.22) return 1;
+        if (a.t < 0.4) return 2;
+        return 3;
+      }
+      return Math.min(n - 1, Math.floor(Math.min(0.99, a.t / 0.4) * n));
     }
     return null;
   }
