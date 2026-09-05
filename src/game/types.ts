@@ -269,6 +269,10 @@ export interface Unit {
   crippled: boolean;
   /** Equipped off-hand EquipmentDef id (kind "weapon" or "shield"), or null. */
   offHandId: string | null;
+  /** Everything this unit is wearing, by slot. Carried on the unit (not just in the save)
+   * so gear can change mid-battle and the stats that depend on it can be recomputed
+   * without rebuilding the unit. See gearStatBonus. */
+  gear: Partial<Record<EquipSlot, string>>;
   /** Summon Familiar (Conjurer tier 1): a player-side unit that doesn't count toward "any
    * hero still alive" for the defeat check or the playerAlive HUD figure — the party can't
    * survive a wipe on a pet alone. Everything else about it (selecting, moving, acting,

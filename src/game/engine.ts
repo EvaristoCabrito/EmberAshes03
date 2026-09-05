@@ -1,4 +1,4 @@
-import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, CURE_DISEASE, CURES, DECORATIONS, DISEASE, DOUBLE_STRIKE, EMPTY_BAG, EQUIPMENT, EXP_TO_LEVEL, expForHit, FIREBALL, FOOTPRINT_TYPE_7, FOOTPRINT_TYPE_8, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, MAGIC_MISSILE, MAX_LEVEL, PIERCING, PIERCING_THRUST, POTION_CARRY_MAX, POTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, WEAPONS, WEB_OF_DREAMS, cureSpan, decorationCells, diceFormula, effectiveMaxRange, enemyLevelFor, fireballFormula, fireballOrigin, fireballPower, fireballRangeTiles, fireballTiles, hexAreaTiles, isProjectile, lightningDice, lightningFormula, missionGearLevel, parseLayout, potionLabel, rollCure, rollDice, rollPotion, spellTier, starterWeaponFor, STARTING_BAG, statsFor, terrainNote, TERRAIN, tierKey, tierUses, weightedLootPick, weightedPotionPick, weightedWeaponPick } from "./data";
+import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, CURE_DISEASE, CURES, DECORATIONS, DISEASE, DOUBLE_STRIKE, EMPTY_BAG, EQUIPMENT, EXP_TO_LEVEL, expForHit, FIREBALL, FOOTPRINT_TYPE_7, FOOTPRINT_TYPE_8, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, MAGIC_MISSILE, MAX_LEVEL, PIERCING, PIERCING_THRUST, POTION_CARRY_MAX, POTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, WEAPON_MAX_ENH, WEAPONS, WEB_OF_DREAMS, cureSpan, decorationCells, diceFormula, effectiveMaxRange, enemyLevelFor, fireballFormula, fireballOrigin, fireballPower, fireballRangeTiles, fireballTiles, hexAreaTiles, isProjectile, lightningDice, lightningFormula, missionGearLevel, parseLayout, potionLabel, rollCure, rollDice, rollPotion, spellTier, starterWeaponFor, STARTING_BAG, statsFor, terrainNote, TERRAIN, tierKey, tierUses, gearStatBonus, offHandBlocked, weightedLootPick, weightedPotionPick, weightedWeaponPick } from "./data";
 import type { SpellTier } from "./data";
 import { canCounter, makeForecast, mulberry32, rollDamage, rollDamageCustom } from "./combat";
 import {
@@ -50,6 +50,7 @@ import type {
   TierKey,
   Unit,
   UnitPublic,
+  EquipSlot,
 } from "./types";
 
 interface Layout {
@@ -252,6 +253,10 @@ interface Roster {
   /** Hero name → equipped offHand EquipmentDef id (shield or off-hand weapon), resolved
    * from save.equipment[hero].offHand. */
   offHand?: Record<string, string>;
+  /** Hero name → every slot they have filled, straight from save.equipment. The off-hand
+   * above is the one slot combat already read; this brings the rest in so worn gear can
+   * contribute stats (see gearStatBonus). */
+  equipment?: Record<string, Partial<Record<EquipSlot, string>>>;
   /** Enemy name → level override, for Map Editor balance-testing. Falls back to the
    * mission's uniform enemyLevelFor(index) when a name has no entry. */
   enemyLevels?: Record<string, number>;
@@ -292,6 +297,10 @@ function spawnUnit(spawn: Mission["playerSpawns"][number], side: Unit["side"], i
   // A two-handed main-hand weapon leaves no free hand for an off-hand item, regardless of
   // what's saved in equipment — enforced here too, not just at the equip screen.
   const offHandId = side === "player" && !weaponDef?.twoHanded ? (roster?.offHand?.[spawn.name] ?? null) : null;
+  const gear: Partial<Record<EquipSlot, string>> = side === "player" ? { ...(roster?.equipment?.[spawn.name] ?? {}) } : {};
+  // Worn gear contributes to combat stats. Only DEF is read today; gearStatBonus computes
+  // the whole set, so turning another stat on is a change here and in reapplyGear below.
+  const gearBonus = gearStatBonus(Object.values(gear));
   return {
     id: `${side}-${spawn.name}-${i}`,
     name: spawn.name,
@@ -306,9 +315,10 @@ function spawnUnit(spawn: Mission["playerSpawns"][number], side: Unit["side"], i
     maxHp: st.hp,
     atk: st.atk,
     mag: st.mag,
-    def: st.def,
+    def: st.def + gearBonus.def,
     res: st.res,
     mov: st.mov,
+    gear,
     minRange,
     maxRange,
     moved: false,
@@ -2387,6 +2397,7 @@ export class BattleEngine {
       stunTurns: 0,
       crippled: false,
       offHandId: null,
+      gear: {},
       summoned: true,
       asleep: false,
       sleepTurns: 0,
@@ -2595,6 +2606,80 @@ export class BattleEngine {
       if (t === "chest" || t === "door") return p;
     }
     return null;
+  }
+
+  /** Removes one found-but-unclaimed weapon/item from this battle's loot list, because it
+   * has just been equipped and written into the save directly. Without this the victory
+   * fold would credit the same drop a second time. */
+  claimLoot(kind: "weapon" | "equipment", id: string): void {
+    const list = kind === "weapon" ? this.lootWeapons : this.lootEquipment;
+    const i = list.indexOf(id);
+    if (i >= 0) list.splice(i, 1);
+  }
+
+  /** Recomputes whatever worn gear contributes, after a slot changed mid-battle.
+   *
+   * Only DEF is applied; gearStatBonus already returns hp/atk/mag/res/mov too, so adding
+   * one is a line here and the matching line in spawnUnit. Kept as its own step rather
+   * than folded into the equip methods so both entry points stay in sync. */
+  private reapplyGear(u: Unit): void {
+    const base = statsFor(u.classId, u.level);
+    const bonus = gearStatBonus(Object.values(u.gear));
+    u.def = base.def + bonus.def;
+  }
+
+  /** Swaps a unit's main-hand weapon mid-battle.
+   *
+   * Changing gear is free and unlimited: it costs neither the turn's action nor its
+   * movement, happens in any order around them, and can repeat until the turn is passed.
+   * So this deliberately does not check `acted` and never calls finishAction — unlike
+   * opening a chest, which does spend the action.
+   *
+   * Range is a weapon property, so it moves with the weapon; damage is rolled from
+   * `weaponId` at attack time and follows on its own. */
+  equipWeaponOn(unitId: string, weaponId: string, enh: number): boolean {
+    const u = this.units.find((x) => x.id === unitId);
+    if (!u || u.side !== "player" || !u.alive) return false;
+    if (this.phase !== "player" || this.result) return false;
+    const def = WEAPONS[weaponId];
+    if (!def) return false;
+
+    u.weaponId = weaponId;
+    u.weaponEnh = Math.max(0, Math.min(WEAPON_MAX_ENH, Math.floor(enh)));
+    u.minRange = def.minRange;
+    u.maxRange = def.maxRange;
+    // Two hands on the weapon leaves none for an off-hand item — the same rule spawnUnit
+    // applies at the start of a battle, enforced again when the weapon changes mid-fight.
+    if (def.twoHanded && u.offHandId) {
+      u.gear.offHand = undefined;
+      u.offHandId = null;
+    }
+    this.reapplyGear(u);
+    this.tip = `${u.name} equipou ${def.name}${u.weaponEnh > 0 ? ` +${u.weaponEnh}` : ""}.`;
+    this.pushLog(this.tip);
+    sfxPlay.ui();
+    return true;
+  }
+
+  /** Swaps one worn equipment slot mid-battle — free, like the main hand above. Passing
+   * null empties the slot. */
+  equipItemOn(unitId: string, slot: EquipSlot, itemId: string | null): boolean {
+    const u = this.units.find((x) => x.id === unitId);
+    if (!u || u.side !== "player" || !u.alive) return false;
+    if (this.phase !== "player" || this.result) return false;
+    const item = itemId ? EQUIPMENT[itemId] : null;
+    if (itemId && (!item || item.slot !== slot)) return false;
+    if (slot === "offHand" && itemId && offHandBlocked(u.weaponId)) return false;
+
+    if (itemId) u.gear[slot] = itemId;
+    else delete u.gear[slot];
+    if (slot === "offHand") u.offHandId = itemId;
+    this.reapplyGear(u);
+
+    this.tip = item ? `${u.name} equipou ${item.name}.` : `${u.name} tirou o item de ${slot}.`;
+    this.pushLog(this.tip);
+    sfxPlay.ui();
+    return true;
   }
 
   /** "Arrombar": spends a Gazua to open an adjacent locked chest/door. */

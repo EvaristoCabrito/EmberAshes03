@@ -1186,6 +1186,29 @@ export function offHandBlocked(mainHandWeaponId: string | null): boolean {
 }
 
 /** Short "+N STAT" summary line for a passive-stat EquipmentDef, classic-RPG-tooltip style. */
+/** Every stat worn gear contributes, summed across the slots a unit has filled.
+ *
+ * EquipmentDef already carries hp/atk/mag/def/res/mov, and this returns all of them, but
+ * only `def` is currently read by combat (see spawnUnit and applyGearBonus in engine.ts).
+ * Wiring another one up is a matter of adding it at those two application sites — the
+ * numbers are already being computed here, and every item in EQUIPMENT already declares
+ * them, so nothing in this file has to change to turn one on. */
+export function gearStatBonus(itemIds: readonly (string | null | undefined)[]): { hp: number; atk: number; mag: number; def: number; res: number; mov: number } {
+  const total = { hp: 0, atk: 0, mag: 0, def: 0, res: 0, mov: 0 };
+  for (const id of itemIds) {
+    if (!id) continue;
+    const it = EQUIPMENT[id];
+    if (!it) continue;
+    total.hp += it.hp ?? 0;
+    total.atk += it.atk ?? 0;
+    total.mag += it.mag ?? 0;
+    total.def += it.def ?? 0;
+    total.res += it.res ?? 0;
+    total.mov += it.mov ?? 0;
+  }
+  return total;
+}
+
 export function equipmentStatSummary(it: EquipmentDef): string {
   const parts: string[] = [];
   if (it.hp) parts.push(`${it.hp > 0 ? "+" : ""}${it.hp} HP`);

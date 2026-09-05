@@ -412,6 +412,9 @@ export function GameApp() {
               .map(([hero, e]) => [hero, e.offHand] as const)
               .filter((entry): entry is [string, string] => !!entry[1]),
           );
+      // Every worn slot, not just the off-hand: gear contributes stats now (gearStatBonus),
+      // so the battle needs the whole map rather than the one slot combat used to read.
+      const equipment = testMode ? undefined : save.equipment;
       const ownedWeaponIds = testMode ? undefined : Object.keys(save.weapons);
       // Spell tier uses don't refill between missions within the same world-map location's
       // run (a "scenario") — only once the whole scenario is done, per direct instruction.
@@ -420,7 +423,7 @@ export function GameApp() {
       const loc = locationForMission(m.id);
       const scenarioStart = !loc || loc.id === "stonebridge" || loc.missionIds.every((mid) => !save.completed.includes(mid));
       const spellSpent = testMode || scenarioStart ? undefined : save.spellUses;
-      const battle = new BattleEngine(m, art, { hp, levels, bags, xp, promotions, weapons, offHand, enemyLevels, ownedWeaponIds, spellSpent }, Date.now() % 100000);
+      const battle = new BattleEngine(m, art, { hp, levels, bags, xp, promotions, weapons, offHand, equipment, enemyLevels, ownedWeaponIds, spellSpent }, Date.now() % 100000);
       if (typeof window !== "undefined" && window.innerWidth < 720) battle.zoom = 0;
       awardedRef.current = null;
       setEngine(battle);
@@ -880,6 +883,26 @@ export function GameApp() {
           paused={paused}
           muted={muted}
           save={save}
+          // Gear swapped during a fight is permanent, so it lands in the save the moment it
+          // happens rather than waiting for a victory that may never come. `alsoOwn` marks a
+          // piece that came out of a chest this battle: the engine has already removed it
+          // from the loot list, so recording ownership here is what keeps it.
+          onEquipWeapon={(hero, weaponId, alsoOwn) => {
+            const rec = activeSave(bank);
+            persistCurrent({
+              ...rec,
+              weapons: alsoOwn && rec.weapons[weaponId] == null ? { ...rec.weapons, [weaponId]: 0 } : rec.weapons,
+              equipped: { ...rec.equipped, [hero]: weaponId },
+            });
+          }}
+          onEquipItem={(hero, slot, itemId, alsoOwn) => {
+            const rec = activeSave(bank);
+            persistCurrent({
+              ...rec,
+              looseEquipment: alsoOwn ? { ...rec.looseEquipment, [itemId]: (rec.looseEquipment[itemId] ?? 0) + 1 } : rec.looseEquipment,
+              equipment: { ...rec.equipment, [hero]: { ...(rec.equipment[hero] ?? {}), [slot]: itemId } },
+            });
+          }}
           onHud={onHud}
           onPause={() => setPaused(true)}
           onResume={() => {
@@ -2553,6 +2576,8 @@ function BattleScreen({
   onSave,
   onLoad,
   onQuit,
+  onEquipWeapon,
+  onEquipItem,
 }: {
   engine: BattleEngine;
   hud: HudSnapshot;
@@ -2566,6 +2591,10 @@ function BattleScreen({
   onSave: () => void;
   onLoad: () => void;
   onQuit: () => void;
+  /** Persist a mid-battle gear change. `alsoOwn` is true when the item came out of a chest
+   * this battle and therefore is not in the save's owned lists yet. */
+  onEquipWeapon?: (hero: string, weaponId: string, alsoOwn: boolean) => void;
+  onEquipItem?: (hero: string, slot: EquipSlot, itemId: string, alsoOwn: boolean) => void;
 }) {
   const [showStatus, setShowStatus] = useState(false);
   const [showLog, setShowLog] = useState(false);
@@ -3062,6 +3091,26 @@ function BattleScreen({
           save={liveSave}
           onClose={() => setInvView(null)}
           onSwitchToBackpack={() => setInvView("pack")}
+          // Gear changes mid-battle cost nothing — not the action, not the movement, and
+          // they can repeat until the turn is passed. Each one writes through to the save
+          // as well as the live unit, so a swap made in a fight is permanent whether the
+          // battle is won, lost or retried.
+          onEquipWeapon={(hero, weaponId) => {
+            const owned = save.weapons[weaponId] != null;
+            const found = engine.lootWeapons.includes(weaponId);
+            if (!owned && !found) return;
+            if (!engine.equipWeaponOn(unit.id, weaponId, save.weapons[weaponId] ?? 0)) return;
+            if (!owned) engine.claimLoot("weapon", weaponId);
+            onEquipWeapon?.(hero, weaponId, !owned);
+          }}
+          onEquipItem={(hero, slot, itemId) => {
+            const owned = (save.looseEquipment[itemId] ?? 0) > 0;
+            const found = engine.lootEquipment.includes(itemId);
+            if (!owned && !found) return;
+            if (!engine.equipItemOn(unit.id, slot, itemId)) return;
+            if (!owned) engine.claimLoot("equipment", itemId);
+            onEquipItem?.(hero, slot, itemId, !owned);
+          }}
         />
       )}
       {invView === "pack" && unit && unit.side === "player" && (
