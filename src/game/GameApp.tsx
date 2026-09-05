@@ -336,6 +336,9 @@ export function GameApp() {
   }, []);
 
   const [customMission, setCustomMission] = useState<Mission | null>(null);
+  /** The map open in the Map Editor, kept out here so a playtest — which unmounts that
+   * screen — does not discard it. */
+  const editorDraft = useRef<MapDraft | null>(null);
   const mission = customMission && customMission.id === missionId ? customMission : missionId ? resolveMission(missionId) : undefined;
   const hasProgress = hasAnySave(bank);
 
@@ -707,6 +710,12 @@ export function GameApp() {
 
       {screen === "mapEditor" && (
         <MapEditorScreen
+          // The editor unmounts while a playtest runs, so the map being worked on is held
+          // out here and handed back on return — otherwise testing a map threw it away.
+          initialDraft={editorDraft.current}
+          onDraftChange={(d) => {
+            editorDraft.current = d;
+          }}
           onBack={() => setScreen("testMenu")}
           onPlaytest={(m, playerLevels, enemyLevels) => {
             setCustomMission(m);
@@ -883,6 +892,7 @@ export function GameApp() {
           paused={paused}
           muted={muted}
           save={save}
+          playtest={!!customMission}
           // Gear swapped during a fight is permanent, so it lands in the save the moment it
           // happens rather than waiting for a victory that may never come. `alsoOwn` marks a
           // piece that came out of a chest this battle: the engine has already removed it
@@ -926,6 +936,13 @@ export function GameApp() {
             setPaused(false);
             setSlotMode(null);
             setEngine(null);
+            // A playtest belongs to the editor: end it and you are back where you were,
+            // with the map still loaded. Quitting a real mission still exits to the map.
+            if (customMission) {
+              setCustomMission(null);
+              setScreen("mapEditor");
+              return;
+            }
             setScreen("worldMap");
           }}
         />
@@ -1687,13 +1704,18 @@ function terrainHint(t: TerrainId, variant?: number): string {
 function MapEditorScreen({
   onBack,
   onPlaytest,
+  initialDraft,
+  onDraftChange,
 }: {
   onBack: () => void;
   onPlaytest: (m: Mission, playerLevels: Record<string, number>, enemyLevels: Record<string, number>) => void;
+  /** The map to reopen with — what was being edited before a playtest took the screen away. */
+  initialDraft?: MapDraft | null;
+  onDraftChange?: (draft: MapDraft) => void;
 }) {
   const [versionStore, setVersionStore] = useState<Record<string, MapVersion[]>>(() => loadVersionStore());
   const [activeVersions, setActiveVersions] = useState<Record<string, number>>(() => loadActiveVersions());
-  const [draft, setDraft] = useState<MapDraft>(() => blankDraft());
+  const [draft, setDraft] = useState<MapDraft>(() => initialDraft ?? blankDraft());
   const [brush, setBrush] = useState<TerrainId>("plains");
   const [variant, setVariant] = useState(0);
   const [decoBrush, setDecoBrush] = useState<string>(Object.keys(DECORATIONS)[0]!);
@@ -1701,7 +1723,19 @@ function MapEditorScreen({
   const [gridStyle, setGridStyle] = useState<"hex" | "square">("hex");
   const [exportText, setExportText] = useState<string | null>(null);
   const [copyOk, setCopyOk] = useState(false);
-  const [note, setNote] = useState<string | null>(null);
+  // Every message carries a serial so repeating an action visibly re-fires: saving twice in
+  // a row used to leave the same sentence sitting there, indistinguishable from nothing
+  // having happened.
+  const [note, setNoteRaw] = useState<{ text: string; n: number } | null>(null);
+  const noteSerial = useRef(0);
+  const setNote = useCallback((text: string) => {
+    noteSerial.current += 1;
+    setNoteRaw({ text, n: noteSerial.current });
+  }, []);
+  useEffect(() => {
+    onDraftChange?.(draft);
+  }, [draft, onDraftChange]);
+
   const [showLocations, setShowLocations] = useState(false);
   // Play order per location, keyed by location id. Seeded from what ALL_LOCATIONS resolved
   // to, so a location with no stored order still lists its missions in the order they play.
@@ -1982,7 +2016,15 @@ function MapEditorScreen({
 
       <div className="flex-1 min-h-0 overflow-y-auto p-4 flex flex-col gap-4">
         <div className="flex flex-wrap items-center gap-2 text-sm">
-          <Button variant="ghost" size="sm" onClick={() => setDraft(blankDraft())}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              const d = blankDraft();
+              setDraft(d);
+              setNote(`Mapa novo em branco — cenário "${d.id}", ${d.cols}x${d.rows}.`);
+            }}
+          >
             Novo
           </Button>
           <Button variant="ghost" size="sm" onClick={() => setShowLocations(true)}>
@@ -1993,7 +2035,9 @@ function MapEditorScreen({
             value=""
             onChange={(e) => {
               const m = missionById(e.target.value);
-              if (m) setDraft(missionToDraft(m));
+              if (!m) return;
+              setDraft(missionToDraft(m));
+              setNote(`Carregado "${m.title}" (${m.id}) da campanha — ${m.cols}x${m.rows}.`);
             }}
           >
             <option value="">Carregar da campanha…</option>
@@ -2025,9 +2069,7 @@ function MapEditorScreen({
             </select>
           )}
         </div>
-        {note && (
-          <p className="text-xs text-accent bg-accent/10 border border-accent/40 rounded-md px-2 py-1.5">{note}</p>
-        )}
+
 
         <div className="grid grid-cols-2 gap-2 text-sm">
           <label className="flex flex-col gap-1" title="O cenário da campanha que essa edição mira. Bate com o id de uma missão real (ex.: o-vau) pra poder ativar essa versão nela, ou qualquer id livre pra um mapa avulso.">
@@ -2480,12 +2522,21 @@ function MapEditorScreen({
       </div>
 
       <div className="p-4 pb-[max(1rem,env(safe-area-inset-bottom))] flex flex-col gap-2 border-t border-border">
+        {/* Pinned to the action bar rather than sitting up in the form: Salvar lives down
+            here, and a confirmation printed a screen and a half above it reads as silence.
+            Keyed on the serial so the same message re-renders when an action repeats. */}
+        {note && (
+          <p key={note.n} className="text-base leading-snug text-accent bg-accent/15 border-2 border-accent/60 rounded-md px-3 py-2.5">
+            {note.text}
+          </p>
+        )}
         <Button
           size="lg"
           className="w-full"
           onClick={() => {
             const playerLevels = Object.fromEntries(draft.playerSpawns.map((s) => [s.name, s.level]));
             const enemyLevels = Object.fromEntries(draft.enemySpawns.map((s) => [s.name, s.level]));
+            setNote("Testando — Encerrar teste nas Opções traz o mapa de volta como está.");
             onPlaytest(draftToMission(draft), playerLevels, enemyLevels);
           }}
         >
@@ -2712,6 +2763,7 @@ function BattleScreen({
   onQuit,
   onEquipWeapon,
   onEquipItem,
+  playtest = false,
 }: {
   engine: BattleEngine;
   hud: HudSnapshot;
@@ -2729,6 +2781,8 @@ function BattleScreen({
    * this battle and therefore is not in the save's owned lists yet. */
   onEquipWeapon?: (hero: string, weaponId: string, alsoOwn: boolean) => void;
   onEquipItem?: (hero: string, slot: EquipSlot, itemId: string, alsoOwn: boolean) => void;
+  /** True while running a map from the editor, which exits back to it rather than quitting. */
+  playtest?: boolean;
 }) {
   const [showStatus, setShowStatus] = useState(false);
   const [showLog, setShowLog] = useState(false);
@@ -3204,7 +3258,7 @@ function BattleScreen({
                 Load
               </Button>
               <Button variant="ghost" onClick={onQuit}>
-                Desistir
+                {playtest ? "Encerrar teste" : "Desistir"}
               </Button>
             </div>
           </div>
