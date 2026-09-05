@@ -12,3 +12,9 @@ art it produced can be re-cut later without hunting for the original.
   `public/game/music/`, which holds only what `src/game/audio.ts` actually plays.
 
 Shipped art lives in `public/game/` — that is the only place the game reads from.
+
+## art/barricade
+
+The four barricade renders, on black. `log-bundle-b.jpg` is what
+`public/game/decorations/barricade.png` was matted out of — one hex, 420x353. The two
+spiked palisades are long: they would suit a two-hex variant, which does not exist yet.
