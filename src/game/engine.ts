@@ -572,9 +572,11 @@ export class BattleEngine {
         ? {
             id: terr.id,
             name: terr.name,
+            moveCost: terr.moveCost,
             def: terr.def,
             atk: terr.atk,
             passable: terr.passable,
+            blocksShot: !!terr.blocksShot,
             hazard: terr.hazardDice ? `${terr.hazardDice}d${terr.hazardFaces ?? 8}` : undefined,
             note: terrainNote(terr.id),
           }

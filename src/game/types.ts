@@ -422,9 +422,13 @@ export interface Forecast {
 export interface TerrainHover {
   id: TerrainId;
   name: string;
+  /** Movement points entering this tile costs. Only meaningful when `passable`. */
+  moveCost: number;
   def: number;
   atk: number;
   passable: boolean;
+  /** True when the tile stops shots and line of sight. */
+  blocksShot: boolean;
   hazard?: string;
   note?: string;
 }

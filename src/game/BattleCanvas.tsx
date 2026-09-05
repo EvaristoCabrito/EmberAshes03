@@ -6,10 +6,14 @@ export function BattleCanvas({
   engine,
   onHud,
   paused = false,
+  onHoldTile,
 }: {
   engine: BattleEngine;
   onHud: (hud: HudSnapshot) => void;
   paused?: boolean;
+  /** Fires while a press is held still on one tile, so the caller can show what that
+   * terrain does. Called with false as soon as the press moves off or lifts. */
+  onHoldTile?: (held: boolean) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -32,6 +36,31 @@ export function BattleCanvas({
     let lastY = 0;
     const held = new Set<string>();
     const pointers = new Map<number, { x: number; y: number }>();
+    // Press-and-hold on a tile reads out its terrain. It has to coexist with dragging the
+    // camera, so the timer is armed on every press and cancelled the moment the pointer
+    // travels far enough to count as a pan.
+    let holdTimer: number | null = null;
+    let holding = false;
+    const cancelHold = () => {
+      if (holdTimer !== null) {
+        window.clearTimeout(holdTimer);
+        holdTimer = null;
+      }
+      if (holding) {
+        holding = false;
+        onHoldTile?.(false);
+      }
+    };
+    const armHold = (px: number, py: number) => {
+      cancelHold();
+      if (paused) return;
+      holdTimer = window.setTimeout(() => {
+        holdTimer = null;
+        holding = true;
+        engine.pointerMove(px, py); // point the hover at the held tile so the HUD describes it
+        onHoldTile?.(true);
+      }, 420);
+    };
     let pinchDist = 0;
     let pinched = false;
 
@@ -127,6 +156,7 @@ export function BattleCanvas({
         lastY = e.clientY;
         canvas.setPointerCapture(e.pointerId);
         canvas.style.cursor = "grabbing";
+        armHold(p.x, p.y);
         return;
       }
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -143,6 +173,7 @@ export function BattleCanvas({
       dragged = false;
       lastX = e.clientX;
       lastY = e.clientY;
+      armHold(p.x, p.y);
       if (engine.getHud().mode === "awaitSpell") {
         engine.pointerMove(p.x, p.y);
       }
@@ -166,7 +197,10 @@ export function BattleCanvas({
       if (e.pointerType === "mouse" && mouseDown) {
         const dx = e.clientX - lastX;
         const dy = e.clientY - lastY;
-        if (Math.abs(dx) + Math.abs(dy) > 3) dragged = true;
+        if (Math.abs(dx) + Math.abs(dy) > 3) {
+          dragged = true;
+          cancelHold();
+        }
         if (dragged) {
           engine.panBy(-dx, -dy);
           lastX = e.clientX;
@@ -177,7 +211,10 @@ export function BattleCanvas({
       if (dragging && e.pointerType !== "mouse" && !spell) {
         const dx = e.clientX - lastX;
         const dy = e.clientY - lastY;
-        if (Math.abs(dx) + Math.abs(dy) > 3) dragged = true;
+        if (Math.abs(dx) + Math.abs(dy) > 3) {
+          dragged = true;
+          cancelHold();
+        }
         if (dragged) {
           engine.panBy(-dx, -dy);
           lastX = e.clientX;
@@ -193,12 +230,14 @@ export function BattleCanvas({
       }
     };
     const onUp = (e: PointerEvent) => {
+      const wasHolding = holding;
+      cancelHold();
       if (e.pointerType === "mouse") {
         canvas.style.cursor = "";
         if (!mouseDown) return;
         mouseDown = false;
         dragging = false;
-        if (!dragged && !paused) {
+        if (!dragged && !paused && !wasHolding) {
           const p = pos(e);
           engine.pointerDown(p.x, p.y, "click");
         }
@@ -214,7 +253,7 @@ export function BattleCanvas({
       }
       if (!dragging) return;
       dragging = false;
-      if (!dragged && !paused) {
+      if (!dragged && !paused && !wasHolding) {
         const p = pos(e);
         engine.pointerDown(p.x, p.y, "tap");
       }
@@ -282,6 +321,7 @@ export function BattleCanvas({
       running = false;
       cancelAnimationFrame(raf);
       ro.disconnect();
+      cancelHold();
       canvas.removeEventListener("pointerdown", onDown);
       canvas.removeEventListener("pointermove", onMove);
       canvas.removeEventListener("pointerup", onUp);

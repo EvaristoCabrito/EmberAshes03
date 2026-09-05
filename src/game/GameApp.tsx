@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, Pencil, RotateCcw, Shield, Swords, Volume2, VolumeX, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { loadGameArt, TILE_VARIANT_COUNT, tileVariantSrc } from "./assets";
+import { loadGameArt, TILE_VARIANT_COUNT, tileVariantName, tileVariantSrc } from "./assets";
 import { installAudioUnlock, playMenuMusic, playTheme, resumeAudio, setMuted, sfxPlay, stopMusic, unlockAudio } from "./audio";
 import { BattleCanvas } from "./BattleCanvas";
 import { InnScreen } from "./InnScreen";
@@ -1672,9 +1672,12 @@ const VARIANT_LABEL: Partial<Record<TerrainId, string[]>> = {
 
 /** Hover text for a terrain type: its combat stats plus terrainNote()'s callout, so the
  * editor documents what each tile actually does instead of just naming it. */
-function terrainHint(t: TerrainId): string {
+function terrainHint(t: TerrainId, variant?: number): string {
   const d = TERRAIN[t];
-  const parts = [d.passable ? `Mov ${d.moveCost}` : "Intransponível", `Def +${d.def}`, `Atk +${d.atk}`];
+  // Which art file this cell actually paints with. Two variants of one terrain are
+  // identical in every rule below, so the name is the only thing that tells them apart.
+  const head = variant == null ? d.name : `${d.name} · ${tileVariantName(t, variant)}`;
+  const parts = [head, d.passable ? `Mov ${d.moveCost}` : "Intransponível", `Def +${d.def}`, `Atk +${d.atk}`];
   if (d.blocksShot) parts.push("bloqueia tiro/visão");
   if (d.hazardDice) parts.push(`dano ${d.hazardDice}D${d.hazardFaces} por turno parado`);
   const note = terrainNote(t);
@@ -2151,7 +2154,7 @@ function MapEditorScreen({
                 <button
                   key={t}
                   type="button"
-                  title={terrainHint(t)}
+                  title={terrainHint(t, brush === t ? variant : 0)}
                   onClick={() => {
                     setBrush(t);
                     setVariant((v) => Math.min(v, (TILE_VARIANT_COUNT[t] ?? 1) - 1));
@@ -2230,7 +2233,7 @@ function MapEditorScreen({
                   <button
                     key={i}
                     type="button"
-                    title={p ? p.name : e ? e.name : deco ?? terrainHint(t)}
+                    title={p ? p.name : e ? e.name : (deco ?? terrainHint(t, draft.tileVariants[i] ?? 0))}
                     onClick={() => onCellClick(x, y)}
                     className={`size-[22px] grid place-items-center text-[9px] font-bold ${deco ? "outline outline-2 outline-offset-[-2px] outline-amber-400/80" : ""}`}
                     style={{ background: TERRAIN_SWATCH[t] }}
@@ -2262,7 +2265,7 @@ function MapEditorScreen({
                       <button
                         key={i}
                         type="button"
-                        title={p ? p.name : e ? e.name : deco ?? terrainHint(t)}
+                        title={p ? p.name : e ? e.name : (deco ?? terrainHint(t, draft.tileVariants[i] ?? 0))}
                         onClick={() => onCellClick(x, y)}
                         className={`absolute grid place-items-center text-[8px] font-bold border ${deco ? "border-amber-400" : "border-black/20"}`}
                         style={{
@@ -2600,6 +2603,9 @@ function BattleScreen({
   const [showLog, setShowLog] = useState(false);
   const logRef = useRef<HTMLDivElement | null>(null);
   const [invView, setInvView] = useState<"doll" | "pack" | null>(null);
+  // Press and hold a tile to read what its terrain does — the same numbers the map editor
+  // shows on hover, which the player had no way to see during a fight.
+  const [heldTile, setHeldTile] = useState(false);
   const [hotbars, setHotbars] = useState<Record<string, (SlotAction | null)[]>>({});
   const [editingSlots, setEditingSlots] = useState(false);
   const [pickerSlot, setPickerSlot] = useState<number | null>(null);
@@ -2764,7 +2770,7 @@ function BattleScreen({
   return (
     <section className="relative h-dvh min-h-0 flex flex-col bg-bg">
       <div className="relative flex-1 min-h-0">
-        <BattleCanvas engine={engine} onHud={onHud} paused={paused} />
+        <BattleCanvas engine={engine} onHud={onHud} paused={paused} onHoldTile={setHeldTile} />
         {hud.turnQueue.length > 1 && (
           <div className="pointer-events-none absolute inset-x-2 top-[max(0.5rem,env(safe-area-inset-top))] flex items-center gap-1 flex-wrap">
             <p className="bg-surface/90 border border-border rounded-md px-2 py-0.5 text-[15px] leading-tight flex items-center gap-1.5 flex-wrap">
@@ -2787,6 +2793,19 @@ function BattleScreen({
                 </span>
               ))}
             </p>
+          </div>
+        )}
+        {heldTile && hud.terrain && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-2 flex justify-center px-3">
+            <div className="bg-surface/95 border border-border rounded-lg px-3 py-2 max-w-sm shadow-lg">
+              <p className="font-display text-base leading-tight">{hud.terrain.name}</p>
+              <p className="text-xs text-muted tabular-nums mt-0.5">
+                {hud.terrain.passable ? `Mov ${hud.terrain.moveCost}` : "Intransponível"} · Def +{hud.terrain.def} · Atk +{hud.terrain.atk}
+                {hud.terrain.blocksShot ? " · bloqueia tiro/visão" : ""}
+                {hud.terrain.hazard ? ` · dano ${hud.terrain.hazard} por turno parado` : ""}
+              </p>
+              {hud.terrain.note && <p className="text-xs text-accent mt-1">{hud.terrain.note}</p>}
+            </div>
           </div>
         )}
         <div className="pointer-events-none absolute inset-x-2 top-[max(0.5rem,env(safe-area-inset-top))] flex items-start justify-end gap-1">

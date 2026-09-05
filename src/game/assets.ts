@@ -24,8 +24,15 @@ export const TILE_VARIANT_COUNT: Record<TerrainId, number> = {
   void: 1,
 };
 
+/** The art file a tile variant paints with, without path or cache-buster — "woods002".
+ * Two variants of the same terrain differ only in art, so this is the only way to tell
+ * from a painted map which of them a cell is actually using. */
+export function tileVariantName(id: TerrainId, variant: number): string {
+  return `${id}${String(variant + 1).padStart(3, "0")}`;
+}
+
 export function tileVariantSrc(id: TerrainId, variant: number): string {
-  return `/game/tiles/${id}${String(variant + 1).padStart(3, "0")}.png?v=16`;
+  return `/game/tiles/${tileVariantName(id, variant)}.png?v=16`;
 }
 const TILES = Object.keys(TILE_VARIANT_COUNT) as TerrainId[];
 const SPRITES: SpriteId[] = ["kael", "nira", "voss", "salazar", "malrec", "aldric", "soldier", "brigand", "captain", "sorcerer", "horror", "Asherah", "pikeman", "wardog", "troll", "familiar", "swamp-blue-calf"];
