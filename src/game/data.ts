@@ -1374,11 +1374,11 @@ export const CAUSTIC_VENOM = {
   size: 3,
   range: 4,
   centerDice: 1,
-  centerFaces: 6,
+  centerFaces: 10,
   centerBonus: 0,
   centerMul: 1.5,
   splashDice: 1,
-  splashFaces: 4,
+  splashFaces: 6,
   splashMul: 1.1,
   splashBonus: 0,
 };
