@@ -10,7 +10,7 @@ import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, CURE_DISEASE, CURES, DECORA
 import { BattleEngine } from "./engine";
 import { WorldMapScreen } from "./WorldMapScreen";
 import { DISPLAY_VERSION } from "./version";
-import { ALL_LOCATIONS, ALL_MISSIONS, draftToMission, latestSerialFor, locationForMission, mapFileName, missionById, missionsForLocation, savedVersionsFor, serialLabel, type MapDraft, type DraftSpawn } from "./mapstore";
+import { ALL_LOCATIONS, ALL_MISSIONS, LOCATION_SLOTS, draftToMission, latestSerialFor, locationFill, locationForMission, mapFileName, missionById, missionsForLocation, savedVersionsFor, serialLabel, slotsFor, type MapDraft, type DraftSpawn } from "./mapstore";
 import {
   activeSave,
   emptySave,
@@ -1680,6 +1680,29 @@ function MapEditorScreen({
   const versions = versionStore[draft.id] ?? [];
   const repoFiles = savedVersionsFor(draft.id);
   const repoLatest = latestSerialFor(draft.id);
+  const [slots, setSlots] = useState<Record<string, number>>(LOCATION_SLOTS);
+
+  /** Declares how many missions a location is meant to hold, so the editor can show what
+   * is still to author. Writes src/game/map-slots.json through the dev server — config,
+   * not a version, so it replaces the previous count instead of adding a serial. */
+  const doSaveSlots = async (next: Record<string, number>) => {
+    setSlots(next);
+    try {
+      const res = await fetch("/__map-slots", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(next),
+      });
+      const body = (await res.json()) as { ok?: boolean; error?: string };
+      if (!res.ok || !body.ok) {
+        setNote(`Não deu pra gravar as vagas: ${body.error ?? `HTTP ${res.status}`}`);
+        return;
+      }
+      setNote("Vagas do local atualizadas em src/game/map-slots.json.");
+    } catch (err) {
+      setNote(`Sem servidor de dev — vagas não gravadas (${err instanceof Error ? err.message : String(err)}).`);
+    }
+  };
   const activeSerial = activeVersions[draft.id];
 
   const decoLookup = useMemo(() => {
@@ -1989,14 +2012,54 @@ function MapEditorScreen({
               onChange={(e) => setDraft((d) => ({ ...d, locationId: e.target.value }))}
             >
               <option value="">Nenhum — não aparece no mapa</option>
-              {ALL_LOCATIONS.map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.name}
-                  {l.missionIds.length === 0 ? " (vazio)" : ` (${l.missionIds.length})`}
-                </option>
-              ))}
+              {ALL_LOCATIONS.map((l) => {
+                const planned = slotsFor(l.id);
+                return (
+                  <option key={l.id} value={l.id}>
+                    {l.name}
+                    {planned > 0 ? ` (${l.missionIds.length}/${planned})` : l.missionIds.length === 0 ? " (vazio)" : ` (${l.missionIds.length})`}
+                  </option>
+                );
+              })}
             </select>
           </label>
+          {draft.locationId !== "" &&
+            (() => {
+              const loc = ALL_LOCATIONS.find((l) => l.id === draft.locationId);
+              const fill = locationFill(draft.locationId);
+              const declared = slots[draft.locationId] ?? 0;
+              return (
+                <label className="flex flex-col gap-1">
+                  <span className="text-muted text-xs uppercase tracking-wide">Telas em {loc?.name ?? draft.locationId}</span>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={0}
+                      max={99}
+                      className="w-16 bg-bg border border-border rounded-md px-2 py-1.5"
+                      value={declared}
+                      onChange={(e) => {
+                        const n = Math.max(0, Math.min(99, Number(e.target.value) || 0));
+                        const next = { ...slots };
+                        if (n > 0) next[draft.locationId] = n;
+                        else delete next[draft.locationId];
+                        void doSaveSlots(next);
+                      }}
+                    />
+                    <span className="text-xs text-muted">
+                      {fill.declared === 0
+                        ? `${fill.filled} feita(s) — sem plano definido`
+                        : `${fill.filled} de ${fill.declared} feita(s), faltam ${fill.empty}`}
+                    </span>
+                  </div>
+                  {loc && loc.missionIds.length > 0 && (
+                    <span className="text-xs text-muted truncate">
+                      Já lá: {loc.missionIds.join(", ")}
+                    </span>
+                  )}
+                </label>
+              );
+            })()}
           <label className="flex items-center gap-2 mt-5">
             <input type="checkbox" checked={draft.hub} onChange={(e) => setDraft((d) => ({ ...d, hub: e.target.checked }))} />
             <span className="text-muted">É um hub (sem combate)</span>

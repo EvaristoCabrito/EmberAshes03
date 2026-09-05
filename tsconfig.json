@@ -27,7 +27,9 @@
         "./src/*"
       ]
     },
-    "allowImportingTsExtensions": true
+    "allowImportingTsExtensions": true,
+    // src/game/map-slots.json is imported directly by src/game/mapstore.ts.
+    "resolveJsonModule": true
   },
   "include": [
     "src",

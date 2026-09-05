@@ -15,6 +15,7 @@
  * a map arranged by hand in the editor loads exactly as it was arranged.
  */
 import { MISSIONS, TILE_CHAR, WORLD_LOCATIONS } from "./data";
+import SLOT_CONFIG from "./map-slots.json";
 import type { DecorationPlacement, Mission, Spawn, TerrainId, WinCondition, WorldLocation } from "./types";
 
 /** A spawn as edited in the Map Editor — the real Spawn shape plus a per-spawn test
@@ -171,3 +172,30 @@ export function missionsForLocation(loc: WorldLocation): Mission[] {
   const live = ALL_LOCATIONS.find((l) => l.id === loc.id) ?? loc;
   return live.missionIds.map((id) => missionById(id)).filter((m): m is Mission => !!m);
 }
+
+/** How many missions a location is meant to end up holding — the plan for it, set in the
+ * Map Editor and stored in src/game/map-slots.json. Declaring Misty Cave as 3 says three
+ * battles belong there, so the editor can show 1 of 3 filled and 2 still to author.
+ *
+ * This is authoring bookkeeping only: it does not gate the world map or the campaign. A
+ * location plays whatever missions actually exist for it, whether that is under or over
+ * the declared count. Unlike a map, the file is config rather than a version — a new
+ * count replaces the old one instead of appending a serial. */
+const SLOTS: Record<string, number> = SLOT_CONFIG;
+
+export function slotsFor(locationId: string): number {
+  const n = SLOTS[locationId];
+  return typeof n === "number" && n > 0 ? Math.floor(n) : 0;
+}
+
+/** What a location currently holds against what it is meant to hold. `declared` is 0 when
+ * no count has been set, which reads as "no plan yet" rather than "zero slots". */
+export function locationFill(locationId: string): { filled: number; declared: number; empty: number } {
+  const loc = ALL_LOCATIONS.find((l) => l.id === locationId);
+  const filled = loc ? loc.missionIds.length : 0;
+  const declared = slotsFor(locationId);
+  return { filled, declared, empty: Math.max(0, declared - filled) };
+}
+
+/** Every location's plan, for the editor's picker. */
+export const LOCATION_SLOTS: Record<string, number> = { ...SLOTS };
