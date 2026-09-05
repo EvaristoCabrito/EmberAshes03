@@ -50,6 +50,7 @@ export const FOOTPRINT_TYPE_8 = [
 
 const DECO_PAIR = [{ dx: 0, dy: 0 }, { dx: 1, dy: 0 }];
 const DECO_TRIO = [{ dx: 0, dy: 0 }, { dx: 1, dy: 0 }, { dx: 0, dy: -1 }];
+const DECO_ONE = [{ dx: 0, dy: 0 }];
 
 // Multi-hex terrain props: rendered as one image over their whole footprint instead of
 // clipped per hex (see DecorationDef). Cropped from LargeHexes1-3.jpg.
@@ -69,10 +70,11 @@ export const DECORATIONS: Record<string, DecorationDef> = {
   gatehouse: { id: "gatehouse", name: "Portão Fortificado", footprint: DECO_PAIR },
   watchtower: { id: "watchtower", name: "Torre de Vigia", footprint: DECO_PAIR },
   "ancient-shrine": { id: "ancient-shrine", name: "Santuário Antigo", footprint: DECO_PAIR },
+  "locked-chest": { id: "locked-chest", name: "Baú trancado", footprint: DECO_ONE },
 };
 
 export function decorationImage(id: string): string {
-  return `/game/decorations/${id}.png`;
+  return `/game/decorations/${id}.png${id === "locked-chest" ? "?v=4" : ""}`;
 }
 
 /** Every hex a placed decoration's footprint covers — impassable and blocks line of
@@ -252,6 +254,23 @@ export const CLASSES: Record<ClassId, ClassDef> = {
   },
   horror: {
     id: "horror",
+    name: "Horror",
+    role: "Abominação",
+    hp: 86,
+    atk: 11,
+    mag: 0,
+    def: 5,
+    res: 5,
+    mov: 3,
+    minRange: 1,
+    maxRange: 1,
+    sprite: "horror",
+    size: 4,
+    footprintOffsets: FOOTPRINT_TYPE_8,
+    init: 6,
+  },
+  asherah: {
+    id: "asherah",
     name: "Asherah",
     role: "Pesadelo",
     hp: 120,
@@ -262,7 +281,7 @@ export const CLASSES: Record<ClassId, ClassDef> = {
     mov: 2,
     minRange: 1,
     maxRange: 1,
-    sprite: "horror",
+    sprite: "Asherah",
     size: 4,
     footprintOffsets: FOOTPRINT_TYPE_8,
     init: 7,
@@ -283,6 +302,22 @@ export const CLASSES: Record<ClassId, ClassDef> = {
     size: 4,
     footprintOffsets: FOOTPRINT_TYPE_8,
     init: 8,
+  },
+  swampBlueCalf: {
+    id: "swampBlueCalf",
+    name: "Swamp Blue Calf",
+    role: "Profano",
+    hp: 22,
+    atk: 7,
+    mag: 0,
+    def: 3,
+    res: 2,
+    mov: 5,
+    minRange: 1,
+    maxRange: 1,
+    sprite: "swamp-blue-calf",
+    size: 1,
+    init: 6,
   },
   // Classes novas — nome, papel e arte ainda são provisórios (sprite reaproveita
   // um já existente até a arte definitiva chegar).
@@ -567,7 +602,9 @@ export const GROWTH: Record<ClassId, { hp: number; atk: number; mag: number; def
   wardog: { hp: 4, atk: 2, mag: 0, def: 2, res: 1 },
   cultist: { hp: 3, atk: 0, mag: 2, def: 1, res: 2 },
   horror: { hp: 4, atk: 2, mag: 0, def: 2, res: 2 },
+  asherah: { hp: 5, atk: 2, mag: 0, def: 2, res: 2 },
   troll: { hp: 5, atk: 2, mag: 0, def: 2, res: 1 },
+  swampBlueCalf: { hp: 3, atk: 2, mag: 0, def: 1, res: 1 },
   assassin: { hp: 3, atk: 3, mag: 0, def: 1, res: 1 },
   rogue: { hp: 3, atk: 2, mag: 0, def: 1, res: 1 },
   lancer: { hp: 4, atk: 2, mag: 0, def: 2, res: 1 },
@@ -1100,6 +1137,8 @@ export const EQUIPMENT: Record<string, EquipmentDef> = {
   "plain-leather-belt": { id: "plain-leather-belt", name: "Cinto de Couro Simples", slot: "waist", hp: 2, price: 30 },
   "heavy-iron-buckle": { id: "heavy-iron-buckle", name: "Fivela de Ferro Pesada", slot: "waist", def: 1, price: 45 },
   "small-leather-pouch": { id: "small-leather-pouch", name: "Bolsa de Couro Pequena", slot: "waist", hp: 3, price: 50 },
+  "large-adventurers-pouch": { id: "large-adventurers-pouch", name: "Bolsa Grande de Aventureiro", slot: "waist", hp: 5, price: 180 },
+  "equipment-satchel": { id: "equipment-satchel", name: "Sacola de Equipamento", slot: "waist", hp: 6, def: 1, price: 350 },
   "double-buckle-belt": { id: "double-buckle-belt", name: "Cinto de Fivela Dupla", slot: "waist", def: 1, hp: 2, price: 70 },
   "ornate-dagger-belt": { id: "ornate-dagger-belt", name: "Cinturão Ornamentado com Bainha", slot: "waist", atk: 1, price: 90 },
   "utility-pouch-belt": { id: "utility-pouch-belt", name: "Cinturão de Utilidades", slot: "waist", atk: 1, hp: 2, price: 120 },
@@ -1145,7 +1184,47 @@ export function equipmentStatSummary(it: EquipmentDef): string {
 }
 
 export function equipmentIcon(id: string): string {
-  return `/game/icons/equipment/${id}.png`;
+  const pouch = id === "small-leather-pouch" || id === "large-adventurers-pouch" || id === "equipment-satchel";
+  return `/game/icons/equipment/${id}.png${pouch ? "?v=ds1" : ""}`;
+}
+
+/** Carried-bag tiers. Default (no waist pouch equipped) is the small leather pouch. */
+export const POUCH_CAPACITY: Record<string, number> = {
+  "small-leather-pouch": 30,
+  "large-adventurers-pouch": 45,
+  "equipment-satchel": 60,
+};
+
+export function isPouch(id: string | null | undefined): boolean {
+  return !!id && id in POUCH_CAPACITY;
+}
+
+export function pouchIcon(itemId?: string | null): string {
+  return equipmentIcon(isPouch(itemId) ? itemId! : "small-leather-pouch");
+}
+
+export function pouchCapacity(itemId?: string | null): number {
+  return (itemId && POUCH_CAPACITY[itemId]) || POUCH_CAPACITY["small-leather-pouch"];
+}
+
+export function equippedPouchId(equipment: Record<string, Partial<Record<string, string>>> | undefined, hero: string): string | null {
+  const id = equipment?.[hero]?.waist;
+  return isPouch(id) ? id! : null;
+}
+
+export function partyPouchId(equipment: Record<string, Partial<Record<string, string>>> | undefined): string | null {
+  let best: string | null = null;
+  let cap = 0;
+  for (const slots of Object.values(equipment ?? {})) {
+    const id = slots.waist;
+    if (!isPouch(id)) continue;
+    const c = pouchCapacity(id);
+    if (c >= cap) {
+      best = id!;
+      cap = c;
+    }
+  }
+  return best;
 }
 
 export function equipmentForClass(classId: ClassId, slot: EquipSlot): EquipmentDef[] {
@@ -1157,9 +1236,11 @@ export const EMBER_DROP: Partial<Record<ClassId, number>> = {
   brigand: 2,
   pikeman: 3,
   wardog: 2,
+  swampBlueCalf: 2,
   cultist: 4,
   captain: 6,
   horror: 10,
+  asherah: 12,
   troll: 8,
 };
 
@@ -1775,7 +1856,7 @@ const RAW_MISSIONS: Mission[] = [
     title: "Bosque Morto",
     place: "Troncos secos",
     briefing:
-      "As árvores não têm folhas há duas estações. O bosque aperta o passo e esconde besteiros. Não deixem Kael sozinho na frente.",
+      "As árvores não têm folhas há duas estações. O bosque aperta o passo e esconde besteiros. No charco fareja um Swamp Blue Calf. Não deixem Kael sozinho na frente.",
     objective: "Derrote todos os inimigos",
     win: "rout",
     cols: 9,
@@ -1800,6 +1881,8 @@ const RAW_MISSIONS: Mission[] = [
       { name: "Soldado", classId: "soldier", x: 7, y: 0 },
       { name: "Besteiro", classId: "brigand", x: 4, y: 1 },
       { name: "Besteiro", classId: "brigand", x: 2, y: 2 },
+      { name: "Swamp Blue Calf", classId: "swampBlueCalf", x: 6, y: 2 },
+      { name: "Swamp Blue Calf", classId: "swampBlueCalf", x: 8, y: 4 },
     ],
   },
   {
@@ -1937,7 +2020,7 @@ const RAW_MISSIONS: Mission[] = [
       { name: "Voss", classId: "mage", x: 7, y: 11 },
     ],
     enemySpawns: [
-      { name: "Asherah", classId: "horror", x: 6, y: 2 },
+      { name: "Asherah", classId: "asherah", x: 6, y: 2 },
       { name: "Feiticeiro", classId: "cultist", x: 2, y: 4 },
       { name: "Feiticeiro", classId: "cultist", x: 10, y: 4 },
       { name: "Feiticeiro", classId: "cultist", x: 2, y: 8 },
@@ -2145,7 +2228,7 @@ const RAW_MISSIONS: Mission[] = [
       // reach of just its own tile: permanently frozen in place regardless of any AI logic,
       // since it could never move onto anything reach-checked. One row deeper clears it.
       { name: "Troll da caverna", classId: "troll", x: 10, y: 7 },
-      { name: "Ember Starved", classId: "horror", x: 6, y: 3, guaranteedDrop: true },
+      { name: "Horror", classId: "horror", x: 6, y: 3, guaranteedDrop: true },
     ],
   },
   {
@@ -2633,139 +2716,33 @@ function decorateOpenTerrain(mission: Mission): Mission {
   const grid: string[][] = mission.layout.map((row) => row.split(""));
   const playerSpawns: Cell[] = mission.playerSpawns.map((s): Cell => [s.x, s.y]);
   const enemySpawns: Cell[] = mission.enemySpawns.map((s): Cell => [s.x, s.y]);
-  const spawns: Cell[] = [...playerSpawns, ...enemySpawns];
-  const spawnSet = new Set(spawns.map(([x, y]) => `${x},${y}`));
-  // A decoration's art (especially the "large" multi-hex ones, like a tree canopy) commonly
-  // renders taller/wider than its own hex footprint and visually bleeds into a neighboring
-  // hex — fine over open ground, but reads as a unit standing "inside" the decoration if
-  // that neighbor happens to be a spawn point, which is confusing even where it's not
-  // actually a pathing block. Building a one-hex buffer around every spawn (not just
-  // excluding the spawn tile itself) keeps decorations from ever anchoring close enough for
-  // that visual bleed to reach a unit.
-  const spawnClearance = new Set(spawnSet);
-  for (const [sx, sy] of spawns) for (const [nx, ny] of hexAdj(sx, sy)) spawnClearance.add(`${nx},${ny}`);
-  // A map that already uses "nave" (indoor black-slab floor) anywhere is an indoor/
-  // underground space — walls stripped off of it should become more slab floor, not
-  // grassy plains, or the whole room reads as an outdoor field with rocks scattered on it
-  // (exactly what happened to "templo": most of its "r" ruin walls had no room left in the
-  // decoration budget, so they fell back to plain grass on a map that's supposed to be a
-  // hanged nave underground).
+  const spawnSet = new Set([...playerSpawns, ...enemySpawns].map(([x, y]) => `${x},${y}`));
   const floorChar = mission.layout.some((row) => row.includes("n")) ? "n" : ".";
-
-  const woodClusters = floodClusters(grid, cols, rows, new Set(["w"])).sort((a, b) => b.length - a.length);
-  const ruinClusters = floodClusters(grid, cols, rows, new Set(["r"])).sort((a, b) => b.length - a.length);
-  const totalWr = woodClusters.reduce((n, c) => n + c.length, 0) + ruinClusters.reduce((n, c) => n + c.length, 0);
-
-  const decorations: DecorationPlacement[] = [];
   const blockedExtra = new Set<string>();
-
-  function tryPlaceOne(anchor: Cell, pool: string[]): boolean {
-    const [ax, ay] = anchor;
-    for (const name of pool) {
-      const def = DECORATIONS[name];
-      if (!def) continue;
-      const cells: Cell[] = def.footprint.map((f): Cell => [ax + f.dx, ay + f.dy]);
-      if (!cells.every(([cx, cy]) => inBoundsCell(cx, cy, cols, rows))) continue;
-      if (cells.some(([cx, cy]) => spawnClearance.has(`${cx},${cy}`))) continue;
-      if (!cells.every(([cx, cy]) => CONVERT_TO_OPEN.has(grid[cy]![cx]!) || KEEP_HOST.has(grid[cy]![cx]!))) continue;
-      if (cells.some(([cx, cy]) => blockedExtra.has(`${cx},${cy}`))) continue;
-      const candidate = new Set(blockedExtra);
-      for (const [cx, cy] of cells) candidate.add(`${cx},${cy}`);
-      if (connectivityOk(grid, cols, rows, candidate, spawns)) {
-        for (const [cx, cy] of cells) blockedExtra.add(`${cx},${cy}`);
-        decorations.push({ id: name, x: ax, y: ay });
-        return true;
-      }
-    }
-    return false;
-  }
-
-  function placeInClusters(clusters: Cell[][], pool: string[], budget: number): number {
-    let placed = 0;
-    let di = 0;
-    for (const cluster of clusters) {
-      if (placed >= budget) break;
-      if (cluster.length < 2) continue;
-      const perClusterBudget = Math.max(1, Math.floor(cluster.length / 5));
-      let got = 0;
-      for (const anchor of cluster) {
-        if (placed >= budget || got >= perClusterBudget) break;
-        const [ax, ay] = anchor;
-        if (spawnClearance.has(`${ax},${ay}`)) continue;
-        const offset = di % pool.length;
-        const rotated = [...pool.slice(offset), ...pool.slice(0, offset)];
-        if (tryPlaceOne(anchor, rotated)) {
-          di += 1;
-          got += 1;
-          placed += 1;
-        }
-      }
-    }
-    return placed;
-  }
-
-  const cap = totalWr > 0 ? Math.min(8, Math.max(2, Math.floor(totalWr / 6))) : 0;
-  const placedTrees = placeInClusters(woodClusters, TREE_DECOS, cap);
-  const placedRuins = placeInClusters(ruinClusters, RUIN_DECOS, Math.max(0, cap - placedTrees) + (placedTrees < cap ? 2 : 0));
-
-  // A map with no wood/ruin clutter to begin with got zero decorations above — cap is 0
-  // when there's nothing to convert. Top it up straight onto open ground so every map ends
-  // up dressed, not just the ones that already had funky tiles to work with. Indoor/
-  // underground maps (floorChar "n" — see its own doc comment above) never get trees or
-  // buildings out of this fallback pool, direct feedback: "there are never houses inside a
-  // cave" — just loose rock clutter, which reads fine anywhere.
-  if (placedTrees + placedRuins < 3) {
-    const openGround: Cell[] = [];
-    for (let y = 0; y < rows; y++) {
-      for (let x = 0; x < cols; x++) {
-        const k = `${x},${y}`;
-        if (grid[y]![x] === floorChar && !spawnClearance.has(k) && !blockedExtra.has(k)) openGround.push([x, y]);
-      }
-    }
-    const rng = mulberry32Local(seedFromId(`${mission.id}-deco`));
-    for (let i = openGround.length - 1; i > 0; i--) {
-      const j = Math.floor(rng() * (i + 1));
-      [openGround[i], openGround[j]] = [openGround[j]!, openGround[i]!];
-    }
-    const pool = floorChar === "n" ? INDOOR_DECOS : [...TREE_DECOS, ...RUIN_DECOS];
-    let placed = 0;
-    const budget = 4;
-    for (const anchor of openGround) {
-      if (placed >= budget) break;
-      const offset = placed % pool.length;
-      const rotated = [...pool.slice(offset), ...pool.slice(0, offset)];
-      if (tryPlaceOne(anchor, rotated)) placed += 1;
-    }
-  }
-
-  for (let y = 0; y < rows; y++) {
-    for (let x = 0; x < cols; x++) {
-      if (CONVERT_TO_OPEN.has(grid[y]![x]!)) grid[y]![x] = floorChar;
-    }
-  }
-
-  // Skip the auto-sprinkle entirely on a map that already hand-places its own chest(s) in
-  // the raw layout — piling more on top made a mission with its own locked/gated chest feel
-  // stuffed with more locks than lockpicks could realistically cover.
   const hasAuthoredChest = mission.layout.some((row) => row.includes("k"));
   if (!hasAuthoredChest) {
     placeChests(grid, cols, rows, playerSpawns, enemySpawns, spawnSet, blockedExtra, seedFromId(mission.id), floorChar);
   }
-
+  const decorations: DecorationPlacement[] = [...(mission.decorations ?? [])];
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      if (grid[y]![x] === "k") decorations.push({ id: "locked-chest", x, y });
+    }
+  }
   return {
     ...mission,
     layout: grid.map((row) => row.join("")),
-    decorations: [...(mission.decorations ?? []), ...decorations],
+    decorations,
   };
 }
 
 /** Missions whose open ground is meant to read as dead/scorched, not living grass — the
  * plains tile's default art is lush green, wrong for a place whose own briefing describes
  * it as ash-choked. Swaps every plains cell to the desaturated third art variant
- * (plains03.png) instead. Add a mission id here rather than touching its terrain type: it's
+ * (plains003.png) instead. Add a mission id here rather than touching its terrain type: it's
  * still mechanically plains (same move cost, same defense), just dressed differently. */
 const DEAD_GROUND_MISSIONS = new Set(["portao"]);
-const DEAD_GROUND_VARIANT = 2;
+const DEAD_GROUND_VARIANT = 0;
 
 function applyDeadGround(mission: Mission): Mission {
   if (!DEAD_GROUND_MISSIONS.has(mission.id)) return mission;

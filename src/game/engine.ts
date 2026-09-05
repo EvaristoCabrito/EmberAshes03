@@ -462,14 +462,18 @@ export class BattleEngine {
     this.tiles = parseLayout(mission.layout);
     this.tileVariants = mission.tileVariants ?? [];
     this.decorations = mission.decorations ?? [];
-    // Every hex a decoration's footprint covers is impassable and blocks line of sight,
-    // regardless of the terrain painted under it — "column" already has exactly those
-    // properties, so reusing it here needs no new passability/LOS plumbing anywhere else.
-    for (const cellKey of decorationCells(this.decorations)) {
-      const [xs, ys] = cellKey.split(",");
-      const x = Number(xs);
-      const y = Number(ys);
-      if (x >= 0 && x < this.cols && y >= 0 && y < this.rows) this.tiles[y * this.cols + x] = "column";
+    // Item decorations (locked chest) sit on chest/door terrain and keep that
+    // terrain's lockpick rules — don't overwrite them as columns.
+    const ITEM_DECO = new Set(["locked-chest"]);
+    for (const p of this.decorations) {
+      if (ITEM_DECO.has(p.id)) continue;
+      const def = DECORATIONS[p.id];
+      if (!def) continue;
+      for (const { dx, dy } of def.footprint) {
+        const x = p.x + dx;
+        const y = p.y + dy;
+        if (x >= 0 && x < this.cols && y >= 0 && y < this.rows) this.tiles[y * this.cols + x] = "column";
+      }
     }
     this.rng = mulberry32(seed + mission.index * 97);
     this.units = [
@@ -2567,6 +2571,22 @@ export class BattleEngine {
     sfxPlay.ui();
   }
 
+  /** Ground a chest sits on — the neighboring floor, never the grass hex in chest001. */
+  private visualFloorAt(x: number, y: number): TerrainId {
+    const floor: TerrainId[] = ["nave", "plains", "ruins", "woods", "hill"];
+    const counts = new Map<TerrainId, number>();
+    for (const n of hexNeighbors(x, y)) {
+      if (!inBounds(n.x, n.y, this.cols, this.rows)) continue;
+      const t = tileAt(this.tiles, this.cols, n.x, n.y);
+      if (floor.includes(t)) counts.set(t, (counts.get(t) ?? 0) + 1);
+    }
+    if (counts.has("nave")) return "nave";
+    if (counts.size) {
+      return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]![0];
+    }
+    return this.tiles.includes("nave") ? "nave" : "plains";
+  }
+
   /** First adjacent locked chest/door around a unit's own tile, or null if none. */
   private adjacentLock(u: Unit): Point | null {
     for (const p of hexNeighbors(u.x, u.y)) {
@@ -2589,7 +2609,8 @@ export class BattleEngine {
     if (!target) return;
     const i = target.y * this.cols + target.x;
     const wasChest = this.tiles[i] === "chest";
-    this.tiles[i] = "plains";
+    this.tiles[i] = this.visualFloorAt(target.x, target.y);
+    this.decorations = this.decorations.filter((d) => !(d.id === "locked-chest" && d.x === target.x && d.y === target.y));
     u.bag.lockpick -= 1;
     u.x = Math.round(u.drawX);
     u.y = Math.round(u.drawY);
@@ -3209,9 +3230,12 @@ export class BattleEngine {
       const cx = sumCx / n;
       const cy = sumCy / n;
       if (cx < -tile * 4 || cy < -tile * 4 || cx > cssW + tile * 4 || cy > cssH + tile * 4) continue;
-      const w = tile * SQRT3 * (maxDx - minDx + 1.7);
-      const h = tile * (1.5 * (maxDy - minDy) + 2.3);
-      ctx.drawImage(img, cx - w / 2, cy - h / 2, w, h);
+      const one = def.footprint.length === 1;
+      const item = p.id === "locked-chest";
+      const w = item ? tile * 0.92 : one ? tile * 1.55 : tile * SQRT3 * (maxDx - minDx + 1.7);
+      const h = item ? tile * 0.72 : one ? tile * 1.65 : tile * (1.5 * (maxDy - minDy) + 2.3);
+      const dy = item ? tile * 0.08 : 0;
+      ctx.drawImage(img, cx - w / 2, cy - h / 2 + dy, w, h);
     }
   }
 
@@ -3290,12 +3314,16 @@ export class BattleEngine {
   private idleFrame(u: Unit, n: number): number {
     if (n <= 1) return 0;
     const moving = this.active?.type === "move" && this.active.id === u.id;
-    if (u.classId === "wardog") {
+    if (u.classId === "familiar") {
+      const rate = moving ? 8.0 : 5.5;
+      return Math.floor(u.bob * rate) % n;
+    }
+    if (u.classId === "wardog" || u.classId === "swampBlueCalf") {
       const rate = moving ? 4.2 : 2.6;
       return Math.floor(u.bob * rate) % n;
     }
     const base =
-      u.classId === "horror" || u.classId === "troll"
+      u.classId === "horror" || u.classId === "asherah" || u.classId === "troll"
         ? 2.0
         : u.sprite === "kael" || u.classId === "mage" || u.classId === "cultist" || u.classId === "healer"
           ? 1.7
@@ -3345,7 +3373,14 @@ export class BattleEngine {
   private liveMotion(u: Unit, cell: number): { bob: number; sway: number; breath: number } {
     if (!u.alive || this.reducedMotion) return { bob: 0, sway: 0, breath: 0 };
     const t = u.bob;
-    if (u.classId === "wardog") {
+    if (u.classId === "familiar") {
+      return {
+        bob: Math.sin(t * 1.6) * 2.4,
+        sway: Math.sin(t * 0.9) * 0.7,
+        breath: 0.02 + Math.sin(t * 1.6) * 0.02,
+      };
+    }
+    if (u.classId === "wardog" || u.classId === "swampBlueCalf") {
       return {
         bob: Math.sin(t * 2.2) * 1.15,
         sway: 0,
@@ -3380,8 +3415,26 @@ export class BattleEngine {
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cssW, cssH);
-    ctx.fillStyle = "#0c0b0a";
-    ctx.fillRect(0, 0, cssW, cssH);
+    const backdrop = this.art.backdrops[this.mission.id];
+    if (backdrop) {
+      const ir = backdrop.width / Math.max(1, backdrop.height);
+      const cr = cssW / Math.max(1, cssH);
+      let dw: number;
+      let dh: number;
+      if (ir > cr) {
+        dh = cssH;
+        dw = cssH * ir;
+      } else {
+        dw = cssW;
+        dh = cssW / ir;
+      }
+      ctx.drawImage(backdrop, (cssW - dw) / 2, (cssH - dh) / 2, dw, dh);
+      ctx.fillStyle = "rgba(12, 11, 10, 0.42)";
+      ctx.fillRect(0, 0, cssW, cssH);
+    } else {
+      ctx.fillStyle = "#0c0b0a";
+      ctx.fillRect(0, 0, cssW, cssH);
+    }
 
     const shake = this.reducedMotion ? 0 : this.trauma * this.trauma;
     if (shake) {
@@ -3399,11 +3452,12 @@ export class BattleEngine {
         const { cx, cy } = this.hexCenter(x, y);
         if (cx < -tile * 2 || cy < -tile * 2 || cx > cssW + tile * 2 || cy > cssH + tile * 2) continue;
         const id = tileAt(this.tiles, this.cols, x, y);
-        const variants = this.art.tiles[id];
+        const drawId = id === "chest" ? this.visualFloorAt(x, y) : id;
+        const variants = this.art.tiles[drawId];
         const variant = this.tileVariants[y * this.cols + x] ?? 0;
         const img = variants[variant] ?? variants[0];
         ctx.save();
-        this.hexPath(ctx, cx, cy, tile * 0.98);
+        this.hexPath(ctx, cx, cy, tile * 1.0);
         ctx.clip();
         if (img) ctx.drawImage(img, cx - tile, cy - tile, tile * 2, tile * 2);
         else {
@@ -3411,11 +3465,6 @@ export class BattleEngine {
           ctx.fill();
         }
         ctx.restore();
-        ctx.strokeStyle = "rgba(240,235,227,0.14)";
-        ctx.lineWidth = 1;
-        this.hexPath(ctx, cx, cy, tile * 0.98);
-        ctx.stroke();
-        if (id === "barricade") barricades.push({ cx, cy });
       }
     }
 
@@ -3433,11 +3482,11 @@ export class BattleEngine {
       const rgb = /rgba?\(([^),]+),([^),]+),([^),]+)/.exec(fill);
       const [r, g, b] = rgb ? [rgb[1]!.trim(), rgb[2]!.trim(), rgb[3]!.trim()] : ["255", "255", "255"];
       ctx.save();
-      ctx.shadowColor = `rgba(${r},${g},${b},${(0.9 * glowPulse).toFixed(3)})`;
-      ctx.shadowBlur = tile * (0.32 + 0.34 * glowPulse);
+      ctx.shadowColor = `rgba(${r},${g},${b},${(0.95 * glowPulse).toFixed(3)})`;
+      ctx.shadowBlur = tile * (0.4 + 0.42 * glowPulse);
       ctx.fillStyle = fill;
-      ctx.strokeStyle = `rgba(${r},${g},${b},${Math.min(1, 0.7 + 0.3 * glowPulse).toFixed(3)})`;
-      ctx.lineWidth = Math.max(1.5, tile * (0.05 + 0.03 * glowPulse));
+      ctx.strokeStyle = `rgba(${r},${g},${b},${Math.min(1, 0.8 + 0.2 * glowPulse).toFixed(3)})`;
+      ctx.lineWidth = Math.max(1.8, tile * (0.06 + 0.035 * glowPulse));
       for (const c of cells) {
         const { cx, cy } = this.hexCenter(c.x, c.y);
         this.hexPath(ctx, cx, cy, tile * 0.92);
@@ -3452,24 +3501,24 @@ export class BattleEngine {
         const [x, y] = k.split(",").map(Number);
         return { x: x!, y: y! };
       });
-      overlay(cells, "rgba(130,100,190,0.3)");
+      overlay(cells, "rgba(170,140,230,0.45)");
     }
 
-    if (this.mode === "idle" && this.threat.length) overlay(this.threat, "rgba(163,90,74,0.44)");
+    if (this.mode === "idle" && this.threat.length) overlay(this.threat, "rgba(220,120,90,0.5)");
 
     if (this.mode === "awaitSpell") {
       const selected = this.units.find((u) => u.id === this.selectedId);
       if (selected && this.spellKind === "fireball") {
-        overlay(fireballRangeTiles(selected, this.cols, this.rows), "rgba(196,90,50,0.3)");
+        overlay(fireballRangeTiles(selected, this.cols, this.rows), "rgba(235,140,70,0.45)");
         const cell = this.hover ?? this.spellAim;
         if (cell && manhattan(selected, cell) <= FIREBALL.range) {
-          overlay(fireballTiles(fireballOrigin(cell, this.cols, this.rows), this.cols, this.rows), "rgba(196,90,50,0.5)");
+          overlay(fireballTiles(fireballOrigin(cell, this.cols, this.rows), this.cols, this.rows), "rgba(235,140,70,0.55)");
         }
       } else if (selected && this.spellKind === "causticVenom") {
-        overlay(fireballRangeTiles(selected, this.cols, this.rows), "rgba(110,150,60,0.3)");
+        overlay(fireballRangeTiles(selected, this.cols, this.rows), "rgba(200,210,90,0.45)");
         const cell = this.hover ?? this.spellAim;
         if (cell && manhattan(selected, cell) <= CAUSTIC_VENOM.range) {
-          overlay(fireballTiles(fireballOrigin(cell, this.cols, this.rows), this.cols, this.rows), "rgba(140,190,70,0.5)");
+          overlay(fireballTiles(fireballOrigin(cell, this.cols, this.rows), this.cols, this.rows), "rgba(200,210,90,0.55)");
         }
       } else if (selected && this.spellKind === "longShot") {
         const reach: Point[] = [];
@@ -3480,59 +3529,59 @@ export class BattleEngine {
             if (d >= selected.minRange && d <= max) reach.push({ x, y });
           }
         }
-        overlay(reach, "rgba(90,120,70,0.3)");
+        overlay(reach, "rgba(210,190,90,0.45)");
         const cell = this.hover ?? this.spellAim;
-        if (cell && this.spellAimValid(selected, cell)) overlay([cell], "rgba(140,170,80,0.55)");
+        if (cell && this.spellAimValid(selected, cell)) overlay([cell], "rgba(230,200,100,0.55)");
       } else if (selected && this.spellKind === "piercing") {
-        overlay(allAxisRays(selected, this.cols, this.rows), "rgba(120,90,50,0.28)");
+        overlay(allAxisRays(selected, this.cols, this.rows), "rgba(220,160,70,0.45)");
         const cell = this.hover ?? this.spellAim;
         const line = cell ? this.piercingRay(selected, cell) : null;
-        if (line) overlay(line, "rgba(196,120,50,0.55)");
+        if (line) overlay(line, "rgba(235,170,80,0.55)");
       } else if (selected && this.spellKind === "piercingThrust") {
-        overlay(this.healRangeTiles(selected, selected.maxRange + 1), "rgba(180,120,60,0.28)");
+        overlay(this.healRangeTiles(selected, selected.maxRange + 1), "rgba(220,160,80,0.45)");
         const cell = this.hover ?? this.spellAim;
         const line = cell ? this.piercingThrustRay(selected, cell) : null;
-        if (line) overlay(line, "rgba(220,150,70,0.55)");
+        if (line) overlay(line, "rgba(235,175,90,0.55)");
       } else if (selected && (this.spellKind === "doubleStrike" || this.spellKind === "trip")) {
-        overlay(this.healRangeTiles(selected, selected.maxRange), "rgba(160,90,50,0.3)");
+        overlay(this.healRangeTiles(selected, selected.maxRange), "rgba(220,120,80,0.45)");
         const cell = this.hover ?? this.spellAim;
-        if (cell && this.spellAimValid(selected, cell)) overlay([cell], "rgba(196,90,50,0.55)");
+        if (cell && this.spellAimValid(selected, cell)) overlay([cell], "rgba(235,120,80,0.55)");
       } else if (selected && this.spellKind === "cleave") {
-        overlay(hexNeighbors(selected.x, selected.y), "rgba(160,90,50,0.3)");
+        overlay(hexNeighbors(selected.x, selected.y), "rgba(220,120,80,0.45)");
         const cell = this.hover ?? this.spellAim;
         const arc = cell ? cleaveHexes(selected, cell, CLEAVE.hexes, this.cols, this.rows) : [];
-        if (arc.length) overlay(arc, "rgba(196,90,50,0.55)");
+        if (arc.length) overlay(arc, "rgba(235,120,80,0.55)");
       } else if (selected && this.spellKind === "summonFamiliar") {
-        overlay(this.healRangeTiles(selected, SUMMON_FAMILIAR.range), "rgba(140,110,200,0.28)");
+        overlay(this.healRangeTiles(selected, SUMMON_FAMILIAR.range), "rgba(180,150,235,0.45)");
         const cell = this.hover ?? this.spellAim;
-        if (cell && this.spellAimValid(selected, cell)) overlay([cell], "rgba(180,150,230,0.55)");
+        if (cell && this.spellAimValid(selected, cell)) overlay([cell], "rgba(200,170,245,0.55)");
       } else if (selected && this.spellKind === "webOfDreams") {
-        overlay(this.healRangeTiles(selected, WEB_OF_DREAMS.range), "rgba(120,90,170,0.28)");
+        overlay(this.healRangeTiles(selected, WEB_OF_DREAMS.range), "rgba(170,140,230,0.45)");
         const cell = this.hover ?? this.spellAim;
         if (cell && manhattan(selected, cell) <= WEB_OF_DREAMS.range) {
-          overlay(hexAreaTiles(cell, WEB_OF_DREAMS.size, this.cols, this.rows), "rgba(150,110,210,0.5)");
+          overlay(hexAreaTiles(cell, WEB_OF_DREAMS.size, this.cols, this.rows), "rgba(185,155,240,0.55)");
         }
       } else if (selected && this.spellKind === "lightning") {
-        overlay(this.healRangeTiles(selected, LIGHTNING.range), "rgba(80,120,170,0.3)");
+        overlay(this.healRangeTiles(selected, LIGHTNING.range), "rgba(140,200,245,0.45)");
         const cell = this.hover ?? this.spellAim;
-        if (cell && this.spellAimValid(selected, cell)) overlay([cell], "rgba(120,170,220,0.55)");
+        if (cell && this.spellAimValid(selected, cell)) overlay([cell], "rgba(160,215,255,0.55)");
       } else if (selected && this.spellKind === "magicMissile") {
-        overlay(this.healRangeTiles(selected, MAGIC_MISSILE.range), "rgba(130,90,170,0.3)");
+        overlay(this.healRangeTiles(selected, MAGIC_MISSILE.range), "rgba(180,150,235,0.45)");
         const cell = this.hover ?? this.spellAim;
-        if (cell && this.spellAimValid(selected, cell)) overlay([cell], "rgba(180,140,220,0.55)");
+        if (cell && this.spellAimValid(selected, cell)) overlay([cell], "rgba(200,170,245,0.55)");
       } else if (selected && this.isHeal(this.spellKind)) {
-        overlay(this.healRangeTiles(selected, CURES[this.spellKind].range), "rgba(90,140,100,0.34)");
+        overlay(this.healRangeTiles(selected, CURES[this.spellKind].range), "rgba(150,210,170,0.45)");
         const cell = this.hover ?? this.spellAim;
-        if (cell && this.validHealTarget(selected, cell)) overlay([cell], "rgba(120,180,120,0.55)");
+        if (cell && this.validHealTarget(selected, cell)) overlay([cell], "rgba(170,230,180,0.55)");
       } else if (selected && this.spellKind === "cureDisease") {
-        overlay(this.healRangeTiles(selected, CURE_DISEASE.range), "rgba(90,140,100,0.34)");
+        overlay(this.healRangeTiles(selected, CURE_DISEASE.range), "rgba(150,210,170,0.45)");
         const cell = this.hover ?? this.spellAim;
-        if (cell && this.validCureDiseaseTarget(selected, cell)) overlay([cell], "rgba(120,180,120,0.55)");
+        if (cell && this.validCureDiseaseTarget(selected, cell)) overlay([cell], "rgba(170,230,180,0.55)");
       }
     }
 
     if (this.mode === "selected" || this.mode === "awaitAttack" || this.mode === "awaitAction") {
-      if (this.mode === "selected") overlay(this.reach.values(), "rgba(61,106,138,0.5)");
+      if (this.mode === "selected") overlay(this.reach.values(), "rgba(140,200,245,0.5)");
       const selected = this.units.find((u) => u.id === this.selectedId);
       const atkTiles: Point[] = [];
       for (const foe of this.units) {
@@ -3542,10 +3591,10 @@ export class BattleEngine {
           atkTiles.push(...footprint(foe));
         }
       }
-      overlay(atkTiles, "rgba(163,90,74,0.55)");
+      overlay(atkTiles, "rgba(230,120,85,0.55)");
       if (this.pendingFoeId) {
         const foe = this.units.find((u) => u.id === this.pendingFoeId);
-        if (foe) overlay(footprint(foe), "rgba(181,74,50,0.55)");
+        if (foe) overlay(footprint(foe), "rgba(245,95,65,0.6)");
       }
     }
 

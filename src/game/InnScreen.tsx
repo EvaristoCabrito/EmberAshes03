@@ -1,13 +1,11 @@
 import { useMemo, useState } from "react";
 import { ChevronLeft, Volume2, VolumeX } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { BAG_MAX, CLASSES, HERO_NAMES, LOCKPICK_PRICE, POTION_CARRY_MAX, POTION_PRICE, WEAPON_MAX_ENH, WEAPONS, heroRecruited, weaponDiceLabel, weaponEnhCost, weaponIcon, weaponPower, weaponRangeLabel, weaponSellValue, weaponsForClass, potionLabel } from "./data";
+import { BAG_MAX, CLASSES, HERO_NAMES, LOCKPICK_PRICE, POTION_CARRY_MAX, POTION_PRICE, WEAPON_MAX_ENH, WEAPONS, heroRecruited, partyPouchId, pouchIcon, weaponDiceLabel, weaponEnhCost, weaponIcon, weaponPower, weaponRangeLabel, weaponSellValue, weaponsForClass, potionLabel } from "./data";
 import { BackpackScreen, PaperDollScreen } from "./InventoryScreens";
 import type { Bag, ClassId, EquipSlot, PotionId, SaveData } from "./types";
 
-// Only the small pouch exists as a carried-bag icon so far — swap this to read the party's
-// actual pouch tier once the shared-capacity upgrade system (small/mid/large) is built.
-const BAG_ICON = "/game/icons/equipment/small-leather-pouch.png";
+const BAG_ICON = pouchIcon(null);
 
 const NPCS = [
   {
@@ -43,9 +41,9 @@ const ICONS: Record<PotionId, string> = {
   mid: "/game/icons/potion-mid.png",
   potent: "/game/icons/potion-potent.png",
   disease: "/game/icons/potion-disease.png",
-  manaSmall: "/game/icons/potion-manaSmall.png",
-  manaMid: "/game/icons/potion-manaMid.png",
-  manaLarge: "/game/icons/potion-manaLarge.png",
+  manaSmall: "/game/icons/potion-manaSmall.png?v=ds2",
+  manaMid: "/game/icons/potion-manaMid.png?v=ds2",
+  manaLarge: "/game/icons/potion-manaLarge.png?v=ds2",
 };
 
 const EMPTY_CART: Record<PotionId, number> = { weak: 0, mid: 0, potent: 0, disease: 0, manaSmall: 0, manaMid: 0, manaLarge: 0 };
@@ -172,9 +170,9 @@ export function InnScreen({
         <button
           type="button"
           onClick={() => setInvView("pack")}
-          className="h-10 px-3 rounded-md border border-border bg-bg/70 text-xs uppercase tracking-[0.14em] flex items-center gap-1.5"
+          className="h-12 px-3 rounded-md border border-border bg-bg/70 text-xs uppercase tracking-[0.14em] flex items-center gap-2"
         >
-          <img src={BAG_ICON} alt="" className="size-5 rounded-sm object-contain" />
+          <img src={BAG_ICON} alt="" className="size-8 shrink-0 rounded-sm object-contain" />
           Mochila
         </button>
         <button
@@ -411,9 +409,9 @@ function SmithPanel({
         <button
           type="button"
           onClick={() => setInvView("pack")}
-          className="h-10 px-3 rounded-md border border-border bg-bg/70 text-xs uppercase tracking-[0.14em] flex items-center gap-1.5"
+          className="h-12 px-3 rounded-md border border-border bg-bg/70 text-xs uppercase tracking-[0.14em] flex items-center gap-2"
         >
-          <img src={BAG_ICON} alt="" className="size-5 rounded-sm object-contain" />
+          <img src={BAG_ICON} alt="" className="size-8 shrink-0 rounded-sm object-contain" />
           Mochila
         </button>
         <p className="text-sm tabular-nums border border-border bg-bg/70 rounded-md px-2 py-1">Ember {ember}</p>

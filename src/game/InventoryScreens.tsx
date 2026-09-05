@@ -4,6 +4,7 @@ import { CLASSES, EMPTY_BAG, EQUIPMENT, EQUIPMENT_SLOTS, WEAPONS, equipmentIcon,
 import type { ClassId, EquipSlot, PotionId, SaveData } from "./types";
 
 const POTIONS: PotionId[] = ["weak", "mid", "potent", "disease", "manaSmall", "manaMid", "manaLarge"];
+const BAG_ICON = "/game/icons/equipment/small-leather-pouch.png";
 
 /** Paper-doll equipment view for one hero. Clicking a slot opens a picker of compatible
  * OWNED items — Mão Principal lists owned weapons for this class (save.weapons), other
@@ -51,7 +52,8 @@ export function PaperDollScreen({
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {onSwitchToBackpack && (
-              <button type="button" onClick={onSwitchToBackpack} className="h-8 px-2.5 rounded-md border border-border text-xs">
+              <button type="button" onClick={onSwitchToBackpack} className="h-12 px-3 rounded-md border border-border text-xs flex items-center gap-2">
+                <img src={BAG_ICON} alt="" className="size-8 shrink-0 rounded-sm object-contain" />
                 Mochila
               </button>
             )}
@@ -257,7 +259,10 @@ export function BackpackScreen({
         <div className="absolute inset-0 bg-bg/55 rounded-xl -z-10" />
         <div className="flex items-start justify-between gap-3 mb-4">
           <div>
-            <p className="font-display text-xl leading-tight drop-shadow-[0_1px_3px_rgba(0,0,0,0.8)]">Mochila</p>
+            <div className="flex items-center gap-2">
+              <img src={BAG_ICON} alt="" className="size-10 shrink-0 rounded-sm object-contain" />
+              <p className="font-display text-xl leading-tight drop-shadow-[0_1px_3px_rgba(0,0,0,0.8)]">Mochila</p>
+            </div>
             <p className="text-xs text-fg/80 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">{heroName}</p>
             <p
               className={`text-[11px] tabular-nums mt-0.5 ${bagCount >= bagCapacity ? "text-danger" : "text-fg/70"} drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]`}
@@ -284,7 +289,7 @@ export function BackpackScreen({
           </div>
           {POTIONS.map((kind) => (
             <div key={kind} className="flex items-center gap-1.5 bg-bg border border-border rounded-md px-2 py-1.5">
-              <img src={`/game/icons/potion-${kind}.png`} alt="" className="size-6 rounded-sm object-cover shrink-0" />
+              <img src={`/game/icons/potion-${kind}.png?v=ds2`} alt="" className="size-6 rounded-sm object-cover shrink-0" />
               <p className="flex-1 text-sm truncate">{potionLabel(kind)}</p>
               <p className="text-sm tabular-nums text-muted">×{bag[kind] ?? 0}</p>
             </div>

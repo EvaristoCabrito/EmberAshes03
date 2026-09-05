@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, Pencil, RotateCcw, Swords, Volume2, VolumeX, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { loadGameArt, TILE_VARIANT_COUNT } from "./assets";
+import { loadGameArt, TILE_VARIANT_COUNT, tileVariantSrc } from "./assets";
 import { installAudioUnlock, playMenuMusic, playTheme, resumeAudio, setMuted, sfxPlay, stopMusic, unlockAudio } from "./audio";
 import { BattleCanvas } from "./BattleCanvas";
 import { InnScreen } from "./InnScreen";
 import { BackpackScreen, PaperDollScreen } from "./InventoryScreens";
-import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, CURE_DISEASE, CURES, DECORATIONS, DOUBLE_STRIKE, EQUIPMENT, EXP_TO_LEVEL, FIREBALL, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, MAGIC_MISSILE, PIERCING, PIERCING_THRUST, MAX_LEVEL, MISSIONS, POTIONS, POTION_LOOT_WEIGHT, PROMOTE_LEVEL, PROMOTED_BASE, PROMOTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, TERRAIN, TILE_CHAR, WEAPONS, WEAPON_MAX_ENH, WEB_OF_DREAMS, WORLD_LOCATIONS, BAG_MAX, LOCKPICK_PRICE, POTION_CARRY_MAX, POTION_PRICE, decorationCells, decorationImage, diceFormula, emberForKill, enemyLevelFor, fireballFormula, lightningFormula, locationForMission, missionById, missionsForLocation, parseLayout, potionLabel, rangeLabel, sheetLine, spellTier, startingBags, statsFor, terrainNote, tierKey, tierUses, weaponEnhCost, weaponSellValue, type SpellTier } from "./data";
+import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, CURE_DISEASE, CURES, DECORATIONS, DOUBLE_STRIKE, EQUIPMENT, EXP_TO_LEVEL, FIREBALL, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, MAGIC_MISSILE, PIERCING, PIERCING_THRUST, MAX_LEVEL, MISSIONS, POTIONS, POTION_LOOT_WEIGHT, PROMOTE_LEVEL, PROMOTED_BASE, PROMOTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, TERRAIN, TILE_CHAR, WEAPONS, WEAPON_MAX_ENH, WEB_OF_DREAMS, WORLD_LOCATIONS, BAG_MAX, LOCKPICK_PRICE, POTION_CARRY_MAX, POTION_PRICE, decorationCells, decorationImage, diceFormula, emberForKill, enemyLevelFor, equippedPouchId, fireballFormula, lightningFormula, locationForMission, missionById, missionsForLocation, parseLayout, potionLabel, pouchIcon, rangeLabel, sheetLine, spellTier, startingBags, statsFor, terrainNote, tierKey, tierUses, weaponEnhCost, weaponSellValue, type SpellTier } from "./data";
 import { BattleEngine } from "./engine";
 import { WorldMapScreen } from "./WorldMapScreen";
 import {
@@ -101,6 +101,7 @@ const BRIEF_ART: Record<string, string> = {
   passagem: "/game/assets/brief-passagem.jpg?v=2",
   vertente: "/game/assets/brief-vertente.jpg?v=2",
   portao: "/game/assets/brief-portao.jpg",
+  profundezas: "/game/assets/profundezas-bg.jpg?v=2",
 };
 
 function briefArt(id: string): string | null {
@@ -116,9 +117,8 @@ const HERO_PORTRAIT: Partial<Record<string, string>> = {
   aldric: "/game/portraits/aldric.png",
 };
 
-// Only the small pouch exists as a carried-bag icon so far — swap this to read the party's
-// actual pouch tier once the shared-capacity upgrade system (small/mid/large) is built.
-const BAG_ICON = "/game/icons/equipment/small-leather-pouch.png";
+// Carried-bag icon follows the waist pouch equipped on that hero (small / large / satchel).
+const BAG_ICON = pouchIcon(null);
 
 type SlotAction = { kind: "spell"; spell: SpellKind } | { kind: "potion"; potion: PotionId };
 const HOTBAR_SLOTS = 12;
@@ -178,45 +178,40 @@ function saveHotbars(bars: Record<string, (SlotAction | null)[]>) {
 }
 
 function slotIcon(action: SlotAction): string {
-  if (action.kind === "potion") return `/game/icons/potion-${action.potion}.png`;
+  if (action.kind === "potion") return `/game/icons/potion-${action.potion}.png?v=ds2`;
   switch (action.spell) {
     case "doubleStrike":
-      return "/game/icons/cleave.png";
+      return "/game/icons/cleave.png?v=ds2";
     case "cleave":
-      return "/game/icons/cleave-crossed-blades.png";
+      return "/game/icons/cleave-crossed-blades.png?v=ds2";
     case "fireball":
-      return "/game/icons/fireball.png";
+      return "/game/icons/fireball.png?v=ds2";
     case "causticVenom":
-      return "/game/icons/caustic-venom.png";
+      return "/game/icons/caustic-venom.png?v=ds2";
     case "lightning":
-      return "/game/icons/lightning.png?v=4";
+      return "/game/icons/lightning.png?v=ds2";
     case "magicMissile":
-      return "/game/icons/magic-missile.png";
+      return "/game/icons/magic-missile.png?v=ds2";
     case "longShot":
-      return "/game/icons/long-shot.png?v=3";
+      return "/game/icons/long-shot.png?v=ds2";
     case "piercing":
-      return "/game/icons/piercing.png?v=3";
+      return "/game/icons/piercing.png?v=ds2";
     case "cureMinor":
-      return "/game/icons/cure-minor.png?v=5";
+      return "/game/icons/cure-minor.png?v=ds2";
     case "cureWounds":
-      return "/game/icons/cure-wounds.png?v=5";
+      return "/game/icons/cure-wounds.png?v=ds2";
     case "cureDisease":
-      return "/game/icons/cure-minor.png?v=5";
-    // Lancer's kit has no dedicated art yet — borrowed placeholders, distinct from each
-    // other within Aldric's own hotbar even though they overlap other classes' icons.
+      return "/game/icons/cure-disease.png?v=ds2";
     case "piercingThrust":
-      return "/game/icons/piercing.png?v=3";
+      return "/game/icons/piercing-thrust.png?v=ds2";
     case "sweep":
-      return "/game/icons/cleave-crossed-blades.png";
+      return "/game/icons/sweep.png?v=ds2";
     case "trip":
-      return "/game/icons/cleave.png";
+      return "/game/icons/trip.png?v=ds2";
     case "summonFamiliar":
-      return "/game/icons/magic-missile.png";
-    // No dedicated web/mist art yet — the caustic-venom cloud icon is the closest existing
-    // placeholder for a hazy area effect, and doesn't collide with anything else in the
-    // Conjurer's own hotbar (their kit no longer shares Mage's spell list).
+      return "/game/icons/summon-familiar.png?v=ds2";
     case "webOfDreams":
-      return "/game/icons/caustic-venom.png";
+      return "/game/icons/web-of-dreams.png?v=ds2";
   }
 }
 
@@ -1132,7 +1127,7 @@ function TitleScreen({
       <div className="relative z-10 flex flex-1 flex-col justify-end px-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] max-w-xl mx-auto w-full">
         <p className="text-sm tracking-[0.28em] uppercase text-muted mb-3">Táticas em cinzas</p>
         <h1 className="font-display text-5xl sm:text-7xl font-medium tracking-tight leading-none mb-4">Ember</h1>
-        <p className="text-[11px] tracking-[0.18em] uppercase text-muted -mt-3 mb-4">V. 2.58</p>
+        <p className="text-[11px] tracking-[0.18em] uppercase text-muted -mt-3 mb-4">V. 0.26</p>
         <p className="text-muted text-base leading-relaxed mb-8 max-w-md">
           Três sobreviventes. Um tabuleiro de guerra. Cada casa conta.
         </p>
@@ -1661,6 +1656,30 @@ const TERRAIN_SWATCH: Record<TerrainId, string> = {
   void: "#050505",
 };
 
+const BUILDER_TERRAIN: TerrainId[] = [
+  "plains",
+  "woods",
+  "water",
+  "ruins",
+  "ember",
+  "hill",
+  "flame",
+  "nave",
+  "column",
+  "barricade",
+  "highwood",
+  "deadtree",
+  "highruin",
+  "chest",
+  "door",
+  "void",
+];
+
+const VARIANT_LABEL: Partial<Record<TerrainId, string[]>> = {
+  woods: ["Bosque", "Sebes"],
+  water: ["Água", "Praia"],
+};
+
 /** Hover text for a terrain type: its combat stats plus terrainNote()'s callout, so the
  * editor documents what each tile actually does instead of just naming it. */
 function terrainHint(t: TerrainId): string {
@@ -2041,8 +2060,9 @@ function MapEditorScreen({
 
         {mode === "paint" && (
           <div className="flex flex-col gap-2">
+            <p className="text-xs text-muted">Básicos na campanha: planície, bosque, água. Aqui pinta qualquer um.</p>
             <div className="flex flex-wrap gap-1.5">
-              {(Object.keys(TERRAIN) as TerrainId[]).map((t) => (
+              {BUILDER_TERRAIN.map((t) => (
                 <button
                   key={t}
                   type="button"
@@ -2051,25 +2071,26 @@ function MapEditorScreen({
                     setBrush(t);
                     setVariant((v) => Math.min(v, (TILE_VARIANT_COUNT[t] ?? 1) - 1));
                   }}
-                  className={`text-xs px-2 py-1 rounded-md border flex items-center gap-1.5 ${brush === t ? "border-accent" : "border-border"}`}
+                  className={`text-xs px-1.5 py-1 rounded-md border flex items-center gap-1.5 ${brush === t ? "border-accent" : "border-border"}`}
                 >
-                  <span className="size-3 rounded-sm inline-block" style={{ background: TERRAIN_SWATCH[t] }} />
+                  <img src={tileVariantSrc(t, 0)} alt="" className="size-7 rounded-sm object-cover bg-bg" />
                   {TERRAIN[t].name}
                 </button>
               ))}
             </div>
-            {(TILE_VARIANT_COUNT[brush] ?? 1) > 1 && (
-              <div className="flex items-center gap-1.5 text-xs">
+            {(TILE_VARIANT_COUNT[brush] ?? 1) >= 1 && (
+              <div className="flex items-center gap-1.5 text-xs flex-wrap">
                 <span className="text-muted uppercase tracking-wide">Versão</span>
-                {Array.from({ length: TILE_VARIANT_COUNT[brush] }, (_, i) => (
+                {Array.from({ length: TILE_VARIANT_COUNT[brush] ?? 1 }, (_, i) => (
                   <button
                     key={i}
                     type="button"
-                    title={`Pinta ${TERRAIN[brush].name} usando a arte ${String(i + 1).padStart(2, "0")}`}
+                    title={VARIANT_LABEL[brush]?.[i] ?? `Arte ${String(i + 1).padStart(3, "0")}`}
                     onClick={() => setVariant(i)}
-                    className={`size-7 rounded-md border overflow-hidden ${variant === i ? "border-accent" : "border-border"}`}
+                    className={`flex items-center gap-1 rounded-md border overflow-hidden pr-1.5 ${variant === i ? "border-accent" : "border-border"}`}
                   >
-                    <img src={`/game/tiles/${brush}${String(i + 1).padStart(2, "0")}.png`} alt="" className="size-full object-cover" />
+                    <img src={tileVariantSrc(brush, i)} alt="" className="size-8 object-cover" />
+                    <span>{VARIANT_LABEL[brush]?.[i] ?? String(i + 1).padStart(3, "0")}</span>
                   </button>
                 ))}
               </div>
@@ -2219,7 +2240,7 @@ function MapEditorScreen({
                 >
                   {classOptions.map((c) => (
                     <option key={c} value={c}>
-                      {CLASSES[c].name}
+                      {CLASSES[c].name} · {CLASSES[c].role}
                     </option>
                   ))}
                 </select>
@@ -2924,6 +2945,7 @@ function BattleScreen({
       {showStatus && unit && (
         <StatusPanel
           unit={unit}
+          bagIcon={pouchIcon(equippedPouchId(liveSave.equipment, unit.name))}
           onClose={() => setShowStatus(false)}
           onOpenInventory={
             unit.side === "player"
@@ -3021,7 +3043,7 @@ function SlotPicker({
   );
 }
 
-function StatusPanel({ unit, onClose, onOpenInventory }: { unit: UnitPublic; onClose: () => void; onOpenInventory?: () => void }) {
+function StatusPanel({ unit, bagIcon, onClose, onOpenInventory }: { unit: UnitPublic; bagIcon?: string; onClose: () => void; onOpenInventory?: () => void }) {
   const stats: Array<[string, string | number]> = [
     ["ATK", unit.atk],
     ["MAG", unit.mag],
@@ -3084,8 +3106,8 @@ function StatusPanel({ unit, onClose, onOpenInventory }: { unit: UnitPublic; onC
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {onOpenInventory && (
-              <button type="button" onClick={onOpenInventory} className="h-9 px-3 rounded-md border border-border text-sm flex items-center gap-1.5">
-                <img src={BAG_ICON} alt="" className="size-5 rounded-sm object-contain" />
+              <button type="button" onClick={onOpenInventory} className="h-12 px-3 rounded-md border border-border text-sm flex items-center gap-2">
+                <img src={bagIcon ?? BAG_ICON} alt="" className="size-8 shrink-0 rounded-sm object-contain" />
                 Mochila
               </button>
             )}
@@ -3126,13 +3148,13 @@ function StatusPanel({ unit, onClose, onOpenInventory }: { unit: UnitPublic; onC
                   {swordsman && (
                     <>
                       <div className="flex items-center gap-1.5 bg-bg border border-border rounded-md px-2 py-1.5">
-                        <img src="/game/icons/cleave.png" alt="" className="size-5 rounded-sm object-cover shrink-0" />
+                        <img src="/game/icons/cleave.png?v=ds2" alt="" className="size-5 rounded-sm object-cover shrink-0" />
                         <p className="text-xs truncate">
                           {DOUBLE_STRIKE.name} <span className="tabular-nums text-muted">×{unit.spells[tierKey(spellTier("doubleStrike")!)]}</span>
                         </p>
                       </div>
                       <div className="flex items-center gap-1.5 bg-bg border border-border rounded-md px-2 py-1.5">
-                        <img src="/game/icons/cleave-crossed-blades.png" alt="" className="size-5 rounded-sm object-cover shrink-0" />
+                        <img src="/game/icons/cleave-crossed-blades.png?v=ds2" alt="" className="size-5 rounded-sm object-cover shrink-0" />
                         <p className="text-xs truncate">
                           {CLEAVE.name} {CLEAVE.hexes} hex, arma + {diceFormula(CLEAVE.bonusDice, CLEAVE.bonusFaces, CLEAVE.bonusBonus)}{" "}
                           <span className="tabular-nums text-muted">×{unit.spells[tierKey(spellTier("cleave")!)]}</span>
@@ -3143,7 +3165,7 @@ function StatusPanel({ unit, onClose, onOpenInventory }: { unit: UnitPublic; onC
                   {mage && (
                     <>
                       <div className="flex items-center gap-1.5 bg-bg border border-border rounded-md px-2 py-1.5">
-                        <img src="/game/icons/magic-missile.png" alt="" className="size-5 rounded-sm object-cover shrink-0" />
+                        <img src="/game/icons/magic-missile.png?v=ds2" alt="" className="size-5 rounded-sm object-cover shrink-0" />
                         <p className="text-xs truncate">
                           {MAGIC_MISSILE.name} {diceFormula(MAGIC_MISSILE.dice, MAGIC_MISSILE.faces, MAGIC_MISSILE.bonus)}{" "}
                           <span className="tabular-nums text-muted">×{unit.spells[tierKey(spellTier("magicMissile")!)]}</span>
@@ -3151,7 +3173,7 @@ function StatusPanel({ unit, onClose, onOpenInventory }: { unit: UnitPublic; onC
                       </div>
                       {unit.spells[tierKey(spellTier("lightning")!)] > 0 && (
                         <div className="flex items-center gap-1.5 bg-bg border border-border rounded-md px-2 py-1.5">
-                          <img src="/game/icons/lightning.png?v=4" alt="" className="size-5 rounded-sm object-cover shrink-0" />
+                          <img src="/game/icons/lightning.png?v=ds2" alt="" className="size-5 rounded-sm object-cover shrink-0" />
                           <p className="text-xs truncate">
                             Raio {lightningFormula(unit.level)} <span className="tabular-nums text-muted">×{unit.spells[tierKey(spellTier("lightning")!)]}</span>
                           </p>
@@ -3159,7 +3181,7 @@ function StatusPanel({ unit, onClose, onOpenInventory }: { unit: UnitPublic; onC
                       )}
                       {unit.spells[tierKey(spellTier("fireball")!)] > 0 && (
                         <div className="flex items-center gap-1.5 bg-bg border border-border rounded-md px-2 py-1.5">
-                          <img src="/game/icons/fireball.png" alt="" className="size-5 rounded-sm object-cover shrink-0" />
+                          <img src="/game/icons/fireball.png?v=ds2" alt="" className="size-5 rounded-sm object-cover shrink-0" />
                           <p className="text-xs truncate">
                             Fogo {fireballFormula(unit.level)} <span className="tabular-nums text-muted">×{unit.spells[tierKey(spellTier("fireball")!)]}</span>
                           </p>
@@ -3167,7 +3189,7 @@ function StatusPanel({ unit, onClose, onOpenInventory }: { unit: UnitPublic; onC
                       )}
                       {unit.spells[tierKey(spellTier("causticVenom")!)] > 0 && (
                         <div className="flex items-center gap-1.5 bg-bg border border-border rounded-md px-2 py-1.5">
-                          <img src="/game/icons/caustic-venom.png" alt="" className="size-5 rounded-sm object-cover shrink-0" />
+                          <img src="/game/icons/caustic-venom.png?v=ds2" alt="" className="size-5 rounded-sm object-cover shrink-0" />
                           <p className="text-xs truncate">
                             {CAUSTIC_VENOM.name} {diceFormula(CAUSTIC_VENOM.centerDice, CAUSTIC_VENOM.centerFaces, CAUSTIC_VENOM.centerBonus)}{" "}
                             <span className="tabular-nums text-muted">×{unit.spells[tierKey(spellTier("causticVenom")!)]}</span>
@@ -3179,13 +3201,13 @@ function StatusPanel({ unit, onClose, onOpenInventory }: { unit: UnitPublic; onC
                   {conjurer && (
                     <>
                       <div className="flex items-center gap-1.5 bg-bg border border-border rounded-md px-2 py-1.5">
-                        <img src="/game/icons/magic-missile.png" alt="" className="size-5 rounded-sm object-cover shrink-0" />
+                        <img src="/game/icons/summon-familiar.png?v=ds2" alt="" className="size-5 rounded-sm object-cover shrink-0" />
                         <p className="text-xs truncate">
                           {SUMMON_FAMILIAR.name} <span className="tabular-nums text-muted">×{unit.spells[tierKey(spellTier("summonFamiliar")!)]}</span>
                         </p>
                       </div>
                       <div className="flex items-center gap-1.5 bg-bg border border-border rounded-md px-2 py-1.5">
-                        <img src="/game/icons/caustic-venom.png" alt="" className="size-5 rounded-sm object-cover shrink-0" />
+                        <img src="/game/icons/web-of-dreams.png?v=ds2" alt="" className="size-5 rounded-sm object-cover shrink-0" />
                         <p className="text-xs truncate">
                           {WEB_OF_DREAMS.name} <span className="tabular-nums text-muted">×{unit.spells[tierKey(spellTier("webOfDreams")!)]}</span>
                         </p>
@@ -3195,13 +3217,13 @@ function StatusPanel({ unit, onClose, onOpenInventory }: { unit: UnitPublic; onC
                   {archer && (
                     <>
                       <div className="flex items-center gap-1.5 bg-bg border border-border rounded-md px-2 py-1.5">
-                        <img src="/game/icons/long-shot.png?v=3" alt="" className="size-5 rounded-sm object-cover shrink-0" />
+                        <img src="/game/icons/long-shot.png?v=ds2" alt="" className="size-5 rounded-sm object-cover shrink-0" />
                         <p className="text-xs truncate">
                           Longo <span className="tabular-nums text-muted">×{unit.spells[tierKey(spellTier("longShot")!)]}</span>
                         </p>
                       </div>
                       <div className="flex items-center gap-1.5 bg-bg border border-border rounded-md px-2 py-1.5">
-                        <img src="/game/icons/piercing.png?v=3" alt="" className="size-5 rounded-sm object-cover shrink-0" />
+                        <img src="/game/icons/piercing.png?v=ds2" alt="" className="size-5 rounded-sm object-cover shrink-0" />
                         <p className="text-xs truncate">
                           Perfura <span className="tabular-nums text-muted">×{unit.spells[tierKey(spellTier("piercing")!)]}</span>
                         </p>
@@ -3211,20 +3233,20 @@ function StatusPanel({ unit, onClose, onOpenInventory }: { unit: UnitPublic; onC
                   {healer && (
                     <>
                       <div className="flex items-center gap-1.5 bg-bg border border-border rounded-md px-2 py-1.5">
-                        <img src="/game/icons/cure-minor.png?v=5" alt="" className="size-5 rounded-sm object-cover shrink-0" />
+                        <img src="/game/icons/cure-minor.png?v=ds2" alt="" className="size-5 rounded-sm object-cover shrink-0" />
                         <p className="text-xs truncate">
                           Menor <span className="tabular-nums text-muted">×{unit.spells[tierKey(spellTier("cureMinor")!)]}</span>
                         </p>
                       </div>
                       <div className="flex items-center gap-1.5 bg-bg border border-border rounded-md px-2 py-1.5">
-                        <img src="/game/icons/cure-wounds.png?v=5" alt="" className="size-5 rounded-sm object-cover shrink-0" />
+                        <img src="/game/icons/cure-wounds.png?v=ds2" alt="" className="size-5 rounded-sm object-cover shrink-0" />
                         <p className="text-xs truncate">
                           Simples <span className="tabular-nums text-muted">×{unit.spells[tierKey(spellTier("cureWounds")!)]}</span>
                         </p>
                       </div>
                       {unit.spells[tierKey(spellTier("cureDisease")!)] > 0 && (
                         <div className="flex items-center gap-1.5 bg-bg border border-border rounded-md px-2 py-1.5">
-                          <img src="/game/icons/cure-minor.png?v=5" alt="" className="size-5 rounded-sm object-cover shrink-0" />
+                          <img src="/game/icons/cure-disease.png?v=ds2" alt="" className="size-5 rounded-sm object-cover shrink-0" />
                           <p className="text-xs truncate">
                             {CURE_DISEASE.name} <span className="tabular-nums text-muted">×{unit.spells[tierKey(spellTier("cureDisease")!)]}</span>
                           </p>
@@ -3235,14 +3257,14 @@ function StatusPanel({ unit, onClose, onOpenInventory }: { unit: UnitPublic; onC
                   {lancer && (
                     <>
                       <div className="flex items-center gap-1.5 bg-bg border border-border rounded-md px-2 py-1.5">
-                        <img src="/game/icons/piercing.png?v=3" alt="" className="size-5 rounded-sm object-cover shrink-0" />
+                        <img src="/game/icons/piercing-thrust.png?v=ds2" alt="" className="size-5 rounded-sm object-cover shrink-0" />
                         <p className="text-xs truncate">
                           {PIERCING_THRUST.name} <span className="tabular-nums text-muted">×{unit.spells[tierKey(spellTier("piercingThrust")!)]}</span>
                         </p>
                       </div>
                       {unit.spells[tierKey(spellTier("sweep")!)] > 0 && (
                         <div className="flex items-center gap-1.5 bg-bg border border-border rounded-md px-2 py-1.5">
-                          <img src="/game/icons/cleave-crossed-blades.png" alt="" className="size-5 rounded-sm object-cover shrink-0" />
+                          <img src="/game/icons/sweep.png?v=ds2" alt="" className="size-5 rounded-sm object-cover shrink-0" />
                           <p className="text-xs truncate">
                             {SWEEP.name} <span className="tabular-nums text-muted">×{unit.spells[tierKey(spellTier("sweep")!)]}</span>
                           </p>
@@ -3250,7 +3272,7 @@ function StatusPanel({ unit, onClose, onOpenInventory }: { unit: UnitPublic; onC
                       )}
                       {unit.spells[tierKey(spellTier("trip")!)] > 0 && (
                         <div className="flex items-center gap-1.5 bg-bg border border-border rounded-md px-2 py-1.5">
-                          <img src="/game/icons/cleave.png" alt="" className="size-5 rounded-sm object-cover shrink-0" />
+                          <img src="/game/icons/trip.png?v=ds2" alt="" className="size-5 rounded-sm object-cover shrink-0" />
                           <p className="text-xs truncate">
                             {TRIP.name} <span className="tabular-nums text-muted">×{unit.spells[tierKey(spellTier("trip")!)]}</span>
                           </p>

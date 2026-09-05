@@ -40,9 +40,11 @@ export type ClassId =
   | "captain"
   | "cultist"
   | "horror"
+  | "asherah"
   | "pikeman"
   | "wardog"
   | "troll"
+  | "swampBlueCalf"
   | "assassin"
   | "rogue"
   | "lancer"
@@ -64,7 +66,7 @@ export type ClassId =
   // computed live from its summoner (see castSummonFamiliar), CLASSES.familiar only
   // supplies a sprite/size/range fallback and satisfies the ClassId-keyed tables below.
   | "familiar";
-export type SpriteId = "kael" | "nira" | "voss" | "salazar" | "malrec" | "aldric" | "soldier" | "brigand" | "captain" | "sorcerer" | "horror" | "pikeman" | "wardog" | "troll" | "familiar";
+export type SpriteId = "kael" | "nira" | "voss" | "salazar" | "malrec" | "aldric" | "soldier" | "brigand" | "captain" | "sorcerer" | "horror" | "Asherah" | "pikeman" | "wardog" | "troll" | "familiar" | "swamp-blue-calf";
 export type HealId = "cureMinor" | "cureWounds";
 export type SpellKind =
   | "fireball"
@@ -474,6 +476,8 @@ export interface GameArt {
   idles: Partial<Record<SpriteId, HTMLImageElement[]>>;
   walkDirs: Partial<Record<SpriteId, WalkDirs>>;
   impact: HTMLImageElement[];
+  /** Optional full-canvas backdrop, keyed by mission id. */
+  backdrops: Record<string, HTMLImageElement>;
 }
 
 export interface BattleUnitSnap {

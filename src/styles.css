@@ -73,6 +73,7 @@
   }
 }
 
+/* NEVER change title-hero / title-veil. Game title screen is frozen. Version lives in GameApp only. */
 .title-hero {
   background-image: url("/game/assets/title-bg.jpg");
   background-size: cover;
