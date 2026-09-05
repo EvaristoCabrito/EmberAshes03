@@ -48,7 +48,10 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-const HERO_IDLE = new Set<SpriteId>(["kael", "nira", "voss", "salazar", "horror", "Asherah"]);
+// The familiar's new sprites are a 12-frame idle like the heroes'. Its old set was 44
+// frames of a much rougher cut; loadGameArt rejects on any missing file, so this count and
+// what is on disk have to move together.
+const HERO_IDLE = new Set<SpriteId>(["kael", "nira", "voss", "salazar", "horror", "Asherah", "familiar"]);
 
 export async function loadGameArt(): Promise<GameArt> {
   const tiles = {} as Record<TerrainId, HTMLImageElement[]>;
@@ -68,8 +71,8 @@ export async function loadGameArt(): Promise<GameArt> {
   const attacks: Partial<Record<SpriteId, HTMLImageElement[]>> = {};
   await Promise.all(
     SPRITES.map(async (id) => {
-      const n = id === "familiar" ? 44 : HERO_IDLE.has(id) ? 12 : 4;
-      const cacheBust = id === "troll" ? "?v=11" : id === "Asherah" ? "?v=3" : id === "familiar" ? "?v=5" : "";
+      const n = HERO_IDLE.has(id) ? 12 : 4;
+      const cacheBust = id === "troll" ? "?v=11" : id === "Asherah" ? "?v=3" : id === "familiar" ? "?v=6" : "";
       sprites[id] = await Promise.all(Array.from({ length: n }, (_, i) => loadImage(`/game/sprites/${id}/${i + 1}.png${cacheBust}`)));
     }),
   );
