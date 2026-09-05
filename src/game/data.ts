@@ -69,7 +69,7 @@ const DECO_ONE = [{ dx: 0, dy: 0 }];
 // Multi-hex terrain props: rendered as one image over their whole footprint instead of
 // clipped per hex (see DecorationDef). Cropped from LargeHexes1-3.jpg.
 export const DECORATIONS: Record<string, DecorationDef> = {
-  "mountain-ridge": { id: "mountain-ridge", name: "Cordilheira", footprint: DECO_PAIR, tile: "column" },
+  "mountain-ridge": { id: "mountain-ridge", name: "Cordilheira", footprint: DECO_PAIR, tile: "hill" },
   "spike-rocks": { id: "spike-rocks", name: "Agulhas de Pedra", footprint: DECO_PAIR, tile: "column" },
   "dead-tree-large": { id: "dead-tree-large", name: "Árvore Morta Grande", footprint: DECO_PAIR, tile: "highwood" },
   "dense-forest": { id: "dense-forest", name: "Bosque Denso", footprint: DECO_PAIR, tile: "woods" },
@@ -2563,7 +2563,9 @@ export function scatterTactics(m: Mission): Mission {
   return { ...m, layout };
 }
 
-const ROCK_IDS = ["mountain-ridge", "spike-rocks", "broken-cliff-wall"];
+// Solid props only: the mountain ridge left this list when it became climbable, since
+// rockifyColumns draws these over column tiles that stay impassable underneath.
+const ROCK_IDS = ["spike-rocks", "broken-cliff-wall"];
 
 /** Replaces every "column" tile (a marble pillar rendered on its own patch of grass —
  * looks absurd indoors, and doubly so on a plains/cave map that has no grass anywhere
