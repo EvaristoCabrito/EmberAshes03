@@ -1,4 +1,4 @@
-import { readdirSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Plugin } from "vite";
 import { defineConfig } from "vite";
@@ -11,6 +11,11 @@ import { grokPwaPlugin } from "./scripts/grok-pwa-plugin.mjs";
 // @ts-expect-error JS plugin alongside the TS vite config
 import { appEnvPlugin } from "./scripts/app-env-plugin.mjs";
 import { isMigrationFile } from "./scripts/migration-plan.mjs";
+
+/** The one version number. `package.json` is the source of truth; the title
+ * screen reads it through `__APP_VERSION__` (see src/game/version.ts) so the
+ * two can't drift apart again. Bump it here and nowhere else. */
+const appVersion: string = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")).version;
 
 /** The files `src/lib/db.ts` globs — same directory, same non-recursive scope. */
 function hasGlobbedMigrations(root: string): boolean {
@@ -156,6 +161,7 @@ export default defineConfig(({ command, isPreview }) => ({
     port: 8081,
     strictPort: true,
   },
+  define: { __APP_VERSION__: JSON.stringify(appVersion) },
   resolve: { tsconfigPaths: true },
   plugins: [
     pgliteBootstrapPlugin(),
