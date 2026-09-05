@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, Pencil, RotateCcw, Swords, Volume2, VolumeX, X } from "lucide-react";
+import { ChevronLeft, Pencil, RotateCcw, Shield, Swords, Volume2, VolumeX, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { loadGameArt, TILE_VARIANT_COUNT, tileVariantSrc } from "./assets";
 import { installAudioUnlock, playMenuMusic, playTheme, resumeAudio, setMuted, sfxPlay, stopMusic, unlockAudio } from "./audio";
@@ -3044,6 +3044,14 @@ function BattleScreen({
                 }
               : undefined
           }
+          onOpenEquipment={
+            unit.side === "player"
+              ? () => {
+                  setShowStatus(false);
+                  setInvView("doll");
+                }
+              : undefined
+          }
         />
       )}
 
@@ -3132,7 +3140,7 @@ function SlotPicker({
   );
 }
 
-function StatusPanel({ unit, bagIcon, onClose, onOpenInventory }: { unit: UnitPublic; bagIcon?: string; onClose: () => void; onOpenInventory?: () => void }) {
+function StatusPanel({ unit, bagIcon, onClose, onOpenInventory, onOpenEquipment }: { unit: UnitPublic; bagIcon?: string; onClose: () => void; onOpenInventory?: () => void; onOpenEquipment?: () => void }) {
   const stats: Array<[string, string | number]> = [
     ["ATK", unit.atk],
     ["MAG", unit.mag],
@@ -3193,13 +3201,21 @@ function StatusPanel({ unit, bagIcon, onClose, onOpenInventory }: { unit: UnitPu
               )}
             </div>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
-            {onOpenInventory && (
-              <button type="button" onClick={onOpenInventory} className="h-12 px-3 rounded-md border border-border text-sm flex items-center gap-2">
-                <img src={bagIcon ?? BAG_ICON} alt="" className="size-8 shrink-0 rounded-sm object-contain" />
-                Mochila
-              </button>
-            )}
+          <div className="flex items-start gap-2 shrink-0">
+            <div className="flex flex-col gap-2">
+              {onOpenInventory && (
+                <button type="button" onClick={onOpenInventory} className="h-12 px-3 rounded-md border border-border text-sm flex items-center gap-2">
+                  <img src={bagIcon ?? BAG_ICON} alt="" className="size-8 shrink-0 rounded-sm object-contain" />
+                  Mochila
+                </button>
+              )}
+              {onOpenEquipment && (
+                <button type="button" onClick={onOpenEquipment} className="h-12 px-3 rounded-md border border-border text-sm flex items-center gap-2">
+                  <Shield className="size-5 shrink-0" />
+                  Equipar
+                </button>
+              )}
+            </div>
             <button type="button" onClick={onClose} className="size-8 grid place-items-center rounded-md border border-border" aria-label="Fechar">
               <X className="size-4" />
             </button>

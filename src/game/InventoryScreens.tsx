@@ -103,10 +103,20 @@ export function PaperDollScreen({
                 key={s.id}
                 type="button"
                 onClick={() => setPicker(s.id)}
-                className="bg-bg border border-border rounded-md px-2 py-1.5 text-left"
+                className="bg-bg border border-border rounded-md px-2 py-1.5 text-left flex items-center gap-2"
               >
-                <p className="text-[10px] uppercase tracking-wide text-muted">{s.label}</p>
-                <p className="text-xs truncate text-fg/90">{item ? item.name : "Vazio"}</p>
+                <span className="flex-1 min-w-0">
+                  <span className="block text-[10px] uppercase tracking-wide text-muted">{s.label}</span>
+                  <span className="block text-xs truncate text-fg/90">{item ? item.name : "Vazio"}</span>
+                </span>
+                {/* Same square icon the picker list and the smith's shelves use, so a slot
+                    reads the same wherever it appears. An empty slot keeps the square as an
+                    outline rather than dropping it, so the two columns stay aligned. */}
+                {item ? (
+                  <img src={equipmentIcon(item.id)} alt="" className="size-9 rounded-sm object-cover shrink-0" />
+                ) : (
+                  <span className="size-9 rounded-sm border border-dashed border-border shrink-0" aria-hidden="true" />
+                )}
               </button>
             );
           })}
@@ -273,7 +283,7 @@ export function BackpackScreen({
           <div className="flex items-center gap-2 shrink-0">
             {onSwitchToDoll && (
               <button type="button" onClick={onSwitchToDoll} className="h-8 px-2.5 rounded-md border border-border bg-bg/80 text-xs">
-                Equipamento
+                Equipar
               </button>
             )}
             <button type="button" onClick={onClose} className="size-8 grid place-items-center rounded-md border border-border bg-bg/80" aria-label="Fechar">
