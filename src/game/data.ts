@@ -1356,7 +1356,8 @@ export const FIREBALL = {
   name: "Bola De Fogo",
   size: 2,
   range: 4,
-  dice: 1,
+  // Two dice, not one: it is meant to land like a monster rather than a spark.
+  dice: 2,
   faces: 6,
   bonus: 0,
   mul: 1.35,
