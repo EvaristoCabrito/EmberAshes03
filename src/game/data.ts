@@ -2506,14 +2506,9 @@ export function scatterTactics(m: Mission): Mission {
       walls.push({ cells, score: (between ? 12 : 0) + sameRow + central * 4 - dFront });
     }
   }
-  // The amounts below were tuned for a campaign map, which expandMaps has already doubled
-  // to roughly 224-352 cells. Run unscaled on a smaller board they crowd it — a raw 10x8
-  // got the same two walls in a quarter of the space — so they follow the area instead.
-  const density = (m.cols * m.rows) / 288;
-  // Two on a campaign-sized board, and capped there: barricades are the most intrusive
-  // thing the scatter places, so the count is allowed to start at two and then stop
-  // climbing rather than growing with every extra hex of map.
-  const wantWalls = Math.min(3, Math.max(1, Math.round(2 * density)));
+  // Fixed amounts, not proportions: the board getting bigger is not a reason to put more
+  // of anything on it.
+  const wantWalls = 2;
   walls.sort((a, b) => b.score - a.score);
   let placed = 0;
   for (const wall of walls) {
@@ -2542,9 +2537,7 @@ export function scatterTactics(m: Mission): Mission {
       got += 1;
     }
   };
-  // Uncapped: high ground should keep coming as the board grows. Only the barricades
-  // above are held back — everything else is meant to be plentiful.
-  pick(Math.max(1, Math.round(4 * density)), "hill");
+  pick(3, "hill");
   const highKinds: TerrainId[] = ["hill", "highwood", "highruin", "deadtree"];
   for (let y = 0; y < m.rows; y++) {
     for (let x = 0; x < m.cols; x++) {
@@ -2752,10 +2745,7 @@ function placeChests(
     const j = Math.floor(rng() * (i + 1));
     [pool[i], pool[j]] = [pool[j]!, pool[i]!];
   }
-  // Deliberately few, and capped however big the board gets: a chest is loot, and loot
-  // stops being a find when the map is littered with it. Scenery and high ground scale;
-  // this and the barricades do not.
-  const budget = Math.min(3, Math.max(1, Math.floor((cols * rows) / 150)));
+  const budget = 1;
   const placed: Cell[] = [];
   for (const [cx, cy] of pool) {
     if (placed.length >= budget) break;
@@ -2864,9 +2854,7 @@ export function scatterDecor(m: Mission): Mission {
   };
 
   const ids = Object.keys(DECORATIONS);
-  // Uncapped and generous: scenery is the thing a board should have lots of, and anything
-  // unwanted is a click to clear.
-  const want = Math.max(3, Math.round(((m.cols * m.rows) / 288) * 10));
+  const want = 6;
   const placed: DecorationPlacement[] = [...(m.decorations ?? [])];
 
   for (let tries = 0, done = 0; tries < want * 40 && done < want; tries++) {
