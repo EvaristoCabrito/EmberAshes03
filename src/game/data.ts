@@ -48,6 +48,20 @@ export const FOOTPRINT_TYPE_8 = [
   { dx: 0, dy: -3 },
 ];
 
+/** Tipo 7 — Type 8 without hex 8 (the lone hex above the head, which sat on empty ground for
+ * the Horror's sprite). Its own constant, not a mutation of FOOTPRINT_TYPE_8 — that shape stays
+ * exactly as defined for every creature still using it. Hex 3 (the left-arm hex) is still under
+ * review; do not move it without explicit confirmation of its target cell. */
+export const FOOTPRINT_TYPE_7 = [
+  { dx: 0, dy: 0 },
+  { dx: 1, dy: 0 },
+  { dx: -1, dy: -1 },
+  { dx: 0, dy: -1 },
+  { dx: 1, dy: -1 },
+  { dx: 0, dy: -2 },
+  { dx: 1, dy: -2 },
+];
+
 const DECO_PAIR = [{ dx: 0, dy: 0 }, { dx: 1, dy: 0 }];
 const DECO_TRIO = [{ dx: 0, dy: 0 }, { dx: 1, dy: 0 }, { dx: 0, dy: -1 }];
 const DECO_ONE = [{ dx: 0, dy: 0 }];
@@ -266,7 +280,7 @@ export const CLASSES: Record<ClassId, ClassDef> = {
     maxRange: 1,
     sprite: "horror",
     size: 4,
-    footprintOffsets: FOOTPRINT_TYPE_8,
+    footprintOffsets: FOOTPRINT_TYPE_7,
     init: 6,
   },
   asherah: {
