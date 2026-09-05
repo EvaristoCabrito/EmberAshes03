@@ -420,6 +420,7 @@ export const CLASSES: Record<ClassId, ClassDef> = {
     sprite: "familiar",
     size: 1,
     init: 5,
+    summon: true,
   },
   paladin: {
     id: "paladin",
@@ -668,6 +669,16 @@ export function expForHit(attackerLevel: number, defenderLevel: number): number 
   if (gap >= EXP_FALLOFF_LEVELS) return 1;
   const t = gap / EXP_FALLOFF_LEVELS;
   return Math.round(BASE_EXP_PER_HIT - (BASE_EXP_PER_HIT - 1) * t);
+}
+
+/** Every class flagged as a summon (see ClassDef.summon) — the Familiar today, and
+ * whatever else gets conjured later. Derived from CLASSES, so a new summon only has to set
+ * the flag: it shows up in the editor's "Invocação" brush and is kept out of the party's
+ * defeat check without another list to remember. */
+export const SUMMON_CLASSES: ClassId[] = (Object.keys(CLASSES) as ClassId[]).filter((c) => !!CLASSES[c].summon);
+
+export function isSummonClass(classId: ClassId): boolean {
+  return !!CLASSES[classId]?.summon;
 }
 
 export function statsFor(classId: ClassId, level: number) {

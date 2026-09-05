@@ -133,6 +133,13 @@ export interface ClassDef {
   footprintOffsets?: { dx: number; dy: number }[];
   /** Turn-order priority: lower acts first. Only set for player classes so far. */
   init?: number;
+  /** Marks a class as a summon rather than a member of the cast: conjured into a battle by
+   * a spell (the Familiar by the Conjurer's tier 1), gone when it ends, and outside the
+   * party's defeat check — losing every summon on the board never loses the mission. It is
+   * a property of the class, not of how the unit reached the board, so a summon dropped
+   * straight onto a map in the editor behaves the same as one conjured in play. Every
+   * summon class that gets added should carry this. */
+  summon?: true;
 }
 
 export interface Spawn {

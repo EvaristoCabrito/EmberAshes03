@@ -6,7 +6,7 @@ import { installAudioUnlock, playMenuMusic, playTheme, resumeAudio, setMuted, sf
 import { BattleCanvas } from "./BattleCanvas";
 import { InnScreen } from "./InnScreen";
 import { BackpackScreen, PaperDollScreen } from "./InventoryScreens";
-import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, CURE_DISEASE, CURES, DECORATIONS, DOUBLE_STRIKE, EQUIPMENT, EXP_TO_LEVEL, FIREBALL, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, MAGIC_MISSILE, PIERCING, PIERCING_THRUST, MAX_LEVEL, POTIONS, POTION_LOOT_WEIGHT, PROMOTE_LEVEL, PROMOTED_BASE, PROMOTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, TERRAIN, WEAPONS, WEAPON_MAX_ENH, WEB_OF_DREAMS, BAG_MAX, LOCKPICK_PRICE, POTION_CARRY_MAX, POTION_PRICE, decorationCells, decorationImage, diceFormula, emberForKill, enemyLevelFor, equippedPouchId, fireballFormula, lightningFormula, dressMap, parseLayout, potionLabel, pouchIcon, rangeLabel, sheetLine, spellFormula, spellTier, startingBags, statsFor, terrainNote, tierKey, tierUses, weaponEnhCost, weaponSellValue, type SpellTier } from "./data";
+import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, CURE_DISEASE, CURES, DECORATIONS, DOUBLE_STRIKE, EQUIPMENT, EXP_TO_LEVEL, FIREBALL, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, MAGIC_MISSILE, PIERCING, PIERCING_THRUST, MAX_LEVEL, POTIONS, POTION_LOOT_WEIGHT, PROMOTE_LEVEL, PROMOTED_BASE, PROMOTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, TERRAIN, WEAPONS, WEAPON_MAX_ENH, WEB_OF_DREAMS, BAG_MAX, LOCKPICK_PRICE, POTION_CARRY_MAX, POTION_PRICE, decorationCells, decorationImage, diceFormula, emberForKill, enemyLevelFor, equippedPouchId, fireballFormula, lightningFormula, dressMap, isSummonClass, SUMMON_CLASSES, parseLayout, potionLabel, pouchIcon, rangeLabel, sheetLine, spellFormula, spellTier, startingBags, statsFor, terrainNote, tierKey, tierUses, weaponEnhCost, weaponSellValue, type SpellTier } from "./data";
 import { BattleEngine } from "./engine";
 import { WorldMapScreen } from "./WorldMapScreen";
 import { DISPLAY_VERSION } from "./version";
@@ -1584,6 +1584,15 @@ const DEFAULT_HEROES: { name: string; classId: ClassId }[] = [
  * starting four the campaign and the inn are built around — the Lancer and the Conjurer are
  * party members too, and a map being authored should be able to place them. Kept separate
  * so widening the editor's reach does not quietly recruit them into a campaign. */
+/** The editor's spawn lists, in display order. A spawn's class decides which group it lands
+ * in, so a summon is listed as one wherever it was placed from. */
+const SPAWN_GROUPS: { side: "playerSpawns" | "enemySpawns"; summon: boolean; label: string }[] = [
+  { side: "playerSpawns", summon: false, label: "Heróis" },
+  { side: "playerSpawns", summon: true, label: "Invocações aliadas" },
+  { side: "enemySpawns", summon: false, label: "Inimigos" },
+  { side: "enemySpawns", summon: true, label: "Invocações inimigas" },
+];
+
 const EDITOR_HEROES: { name: string; classId: ClassId }[] = [
   ...DEFAULT_HEROES,
   { name: "Aldric", classId: "lancer" },
@@ -1746,7 +1755,14 @@ function MapEditorScreen({
   const [brush, setBrush] = useState<TerrainId>("plains");
   const [variant, setVariant] = useState(0);
   const [decoBrush, setDecoBrush] = useState<string>(Object.keys(DECORATIONS)[0]!);
-  const [mode, setMode] = useState<"paint" | "player" | "enemy" | "decoration">("paint");
+  const [mode, setMode] = useState<"paint" | "player" | "enemy" | "summon" | "decoration">("paint");
+  // Which summon class the "Invocação" brush drops. Summons live in playerSpawns alongside
+  // the heroes — the class itself says which of the two a spawn is (isSummonClass), so
+  // there is no third list to keep in sync and no saved map to migrate.
+  const [summonBrush, setSummonBrush] = useState<ClassId>(SUMMON_CLASSES[0] ?? "familiar");
+  // Summons exist on both sides — the Conjurer's familiar, and whatever an enemy caster
+  // brings up. The brush drops into whichever side this points at.
+  const [summonSide, setSummonSide] = useState<"player" | "enemy">("player");
   const [gridStyle, setGridStyle] = useState<"hex" | "square">("hex");
   const [exportText, setExportText] = useState<string | null>(null);
   const [copyOk, setCopyOk] = useState(false);
@@ -1878,20 +1894,31 @@ function MapEditorScreen({
 
   const toggleSpawn = (x: number, y: number) => {
     setDraft((d) => {
-      const key: "playerSpawns" | "enemySpawns" = mode === "player" ? "playerSpawns" : "enemySpawns";
+      // Summons share the spawn list of the side they belong to — the class itself says a
+      // spawn is a summon (isSummonClass), so there is no third list to keep in sync and no
+      // saved map to migrate. Either brush on a side lifts whatever unit is on the cell, so
+      // clicking a familiar with the Herói brush removes the familiar rather than no-opping.
+      const enemySide = mode === "enemy" || (mode === "summon" && summonSide === "enemy");
+      const key: "playerSpawns" | "enemySpawns" = enemySide ? "enemySpawns" : "playerSpawns";
       const list = d[key];
       const existing = list.findIndex((s) => s.x === x && s.y === y);
       if (existing >= 0) {
         return { ...d, [key]: list.filter((_, i) => i !== existing) };
       }
-      const n = list.length + 1;
-      const spawn: DraftSpawn = {
-        name: mode === "player" ? `Herói ${n}` : `Inimigo ${n}`,
-        classId: mode === "player" ? "swordsman" : "soldier",
-        x,
-        y,
-        level: mode === "player" ? DEFAULT_TEST_LEVEL : enemyLevelFor(0),
-      };
+      const summons = list.filter((s) => isSummonClass(s.classId)).length;
+      const plain = list.length - summons;
+      const spawn: DraftSpawn =
+        mode === "summon"
+          ? {
+              name: `${CLASSES[summonBrush].name} ${summons + 1}`,
+              classId: summonBrush,
+              x,
+              y,
+              level: enemySide ? enemyLevelFor(0) : DEFAULT_TEST_LEVEL,
+            }
+          : mode === "player"
+            ? { name: `Herói ${plain + 1}`, classId: "swordsman", x, y, level: DEFAULT_TEST_LEVEL }
+            : { name: `Inimigo ${plain + 1}`, classId: "soldier", x, y, level: enemyLevelFor(0) };
       return { ...d, [key]: [...list, spawn] };
     });
   };
@@ -2084,6 +2111,13 @@ function MapEditorScreen({
   };
 
   const classOptions = Object.keys(CLASSES) as ClassId[];
+
+  /** Cell tooltip for a spawn: the name, its class, and — for a summon — that it is one, so
+   * the "S" on the grid reads without having to hunt for it in the lists below. */
+  const spawnHint = (sp: DraftSpawn) =>
+    isSummonClass(sp.classId)
+      ? `${sp.name} · ${CLASSES[sp.classId].name} (invocação)`
+      : `${sp.name} · ${CLASSES[sp.classId].name}`;
 
   return (
     <section className="h-dvh min-h-0 flex flex-col bg-bg">
@@ -2347,14 +2381,14 @@ function MapEditorScreen({
             ))}
           </div>
           <div className="flex rounded-md border border-border overflow-hidden text-xs">
-            {(["paint", "decoration", "player", "enemy"] as const).map((m) => (
+            {(["paint", "decoration", "player", "enemy", "summon"] as const).map((m) => (
               <button
                 key={m}
                 type="button"
                 onClick={() => setMode(m)}
                 className={`px-2.5 py-1.5 ${mode === m ? "bg-accent text-bg" : "bg-bg text-muted"}`}
               >
-                {m === "paint" ? "Terreno" : m === "decoration" ? "Decoração" : m === "player" ? "Herói" : "Inimigo"}
+                {m === "paint" ? "Terreno" : m === "decoration" ? "Decoração" : m === "player" ? "Herói" : m === "enemy" ? "Inimigo" : "Invocação"}
               </button>
             ))}
           </div>
@@ -2446,6 +2480,43 @@ function MapEditorScreen({
           </p>
         )}
 
+        {mode === "summon" && (
+          <div className="flex flex-col gap-2 border border-border rounded-md p-2 bg-bg/40">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs uppercase tracking-wide text-muted">Lado</span>
+              <div className="flex rounded-md overflow-hidden border border-border text-xs">
+                {(["player", "enemy"] as const).map((sd) => (
+                  <button
+                    key={sd}
+                    type="button"
+                    onClick={() => setSummonSide(sd)}
+                    className={`px-2.5 py-1.5 ${summonSide === sd ? (sd === "enemy" ? "bg-danger text-bg" : "bg-accent text-bg") : "bg-bg text-muted"}`}
+                  >
+                    {sd === "player" ? "Aliada" : "Inimiga"}
+                  </button>
+                ))}
+              </div>
+              <span className="text-xs uppercase tracking-wide text-muted ml-2">Tipo</span>
+              <select
+                className="bg-bg border border-border rounded-md px-1.5 py-1 text-xs"
+                value={summonBrush}
+                onChange={(e) => setSummonBrush(e.target.value as ClassId)}
+              >
+                {SUMMON_CLASSES.map((c) => (
+                  <option key={c} value={c}>
+                    {CLASSES[c].name} · {CLASSES[c].role}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <p className="text-xs text-muted">
+              Clique numa casa vazia pra pôr {CLASSES[summonBrush].name.toLowerCase()} {summonSide === "enemy" ? "do lado inimigo" : "do lado aliado"};
+              clique numa casa ocupada desse lado pra remover. Invocações aliadas não contam na derrota — perder todas
+              não perde a missão. Invocações inimigas contam pra limpar o mapa, como qualquer inimigo.
+            </p>
+          </div>
+        )}
+
         <div
           className="overflow-auto resize shrink-0 border border-border rounded-md p-2 bg-bg/40 h-[60vh] min-h-[320px] min-w-[280px] [&::-webkit-scrollbar]:h-3 [&::-webkit-scrollbar]:w-3 [&::-webkit-scrollbar-track]:bg-bg/60 [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-thumb]:rounded-full"
           style={{ scrollbarWidth: "auto", scrollbarColor: "var(--color-border, #5a5a5a) transparent" }}
@@ -2465,12 +2536,18 @@ function MapEditorScreen({
                   <button
                     key={i}
                     type="button"
-                    title={p ? p.name : e ? e.name : (deco ?? terrainHint(t, draft.tileVariants[i] ?? 0))}
+                    title={p ? spawnHint(p) : e ? spawnHint(e) : (deco ?? terrainHint(t, draft.tileVariants[i] ?? 0))}
                     onClick={() => onCellClick(x, y)}
                     className={`size-[22px] grid place-items-center text-[9px] font-bold ${deco ? "outline outline-2 outline-offset-[-2px] outline-amber-400/80" : ""}`}
                     style={{ background: TERRAIN_SWATCH[t] }}
                   >
-                    {p ? <span className="text-sky-300">P</span> : e ? <span className="text-red-400">E</span> : deco ? <span className="text-amber-300">D</span> : null}
+                    {p ? (
+                      <span className={isSummonClass(p.classId) ? "text-violet-300" : "text-sky-300"}>{isSummonClass(p.classId) ? "S" : "P"}</span>
+                    ) : e ? (
+                      <span className={isSummonClass(e.classId) ? "text-fuchsia-400" : "text-red-400"}>{isSummonClass(e.classId) ? "S" : "E"}</span>
+                    ) : deco ? (
+                      <span className="text-amber-300">D</span>
+                    ) : null}
                   </button>
                 );
               })}
@@ -2497,7 +2574,7 @@ function MapEditorScreen({
                       <button
                         key={i}
                         type="button"
-                        title={p ? p.name : e ? e.name : (deco ?? terrainHint(t, draft.tileVariants[i] ?? 0))}
+                        title={p ? spawnHint(p) : e ? spawnHint(e) : (deco ?? terrainHint(t, draft.tileVariants[i] ?? 0))}
                         onClick={() => onCellClick(x, y)}
                         className={`absolute grid place-items-center text-[8px] font-bold border ${deco ? "border-amber-400" : "border-black/20"}`}
                         style={{
@@ -2509,7 +2586,13 @@ function MapEditorScreen({
                           clipPath: "polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)",
                         }}
                       >
-                        {p ? <span className="text-sky-300">P</span> : e ? <span className="text-red-400">E</span> : deco ? <span className="text-amber-300">D</span> : null}
+                        {p ? (
+                      <span className={isSummonClass(p.classId) ? "text-violet-300" : "text-sky-300"}>{isSummonClass(p.classId) ? "S" : "P"}</span>
+                    ) : e ? (
+                      <span className={isSummonClass(e.classId) ? "text-fuchsia-400" : "text-red-400"}>{isSummonClass(e.classId) ? "S" : "E"}</span>
+                    ) : deco ? (
+                      <span className="text-amber-300">D</span>
+                    ) : null}
                       </button>
                     );
                   })}
@@ -2540,12 +2623,20 @@ function MapEditorScreen({
           </div>
         )}
 
-        {(["playerSpawns", "enemySpawns"] as const).map((side) => (
-          <div key={side} className="flex flex-col gap-1.5">
+        {/* Four groups over two lists: a spawn's class decides whether it is listed as a
+            unit of the cast or as a summon, so changing the class in the dropdown moves the
+            row between groups on its own. Indices stay the real ones into draft[side] —
+            updateSpawn/removeSpawn address the underlying list, not the filtered view. */}
+        {SPAWN_GROUPS.map((group) => {
+          const side = group.side;
+          const rows = draft[side].map((sp, i) => ({ sp, i })).filter(({ sp }) => isSummonClass(sp.classId) === group.summon);
+          if (rows.length === 0) return null;
+          return (
+          <div key={`${side}-${group.summon}`} className="flex flex-col gap-1.5">
             <p className="text-xs uppercase tracking-wide text-muted">
-              {side === "playerSpawns" ? "Heróis" : "Inimigos"} ({draft[side].length})
+              {group.label} ({rows.length})
             </p>
-            {draft[side].map((s, i) => (
+            {rows.map(({ sp: s, i }) => (
               <div key={i} className="flex items-center gap-1.5 text-xs">
                 <span className="text-muted tabular-nums w-10">{s.x},{s.y}</span>
                 <input
@@ -2583,7 +2674,8 @@ function MapEditorScreen({
               </div>
             ))}
           </div>
-        ))}
+          );
+        })}
 
         <div className="flex flex-col gap-1.5">
           <p className="text-xs uppercase tracking-wide text-muted">
