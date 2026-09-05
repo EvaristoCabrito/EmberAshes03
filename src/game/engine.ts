@@ -3501,7 +3501,7 @@ export class BattleEngine {
       return Math.floor(u.bob * rate) % n;
     }
     const base =
-      u.classId === "horror" || u.classId === "asherah" || u.classId === "troll"
+      u.classId === "horror" || u.classId === "asherah" || u.classId === "troll" || u.classId === "ancientGolem"
         ? 2.0
         : u.sprite === "kael" || u.classId === "mage" || u.classId === "cultist" || u.classId === "healer"
           ? 1.7
@@ -3862,7 +3862,10 @@ export class BattleEngine {
       const atk = this.attackPose(u);
       const moving = this.active?.type === "move" && this.active.id === u.id;
       const idle = !atk && !moving ? this.art.idles[u.sprite] : undefined;
-      const frames = atk != null ? this.art.attacks[u.sprite] : idle ?? this.art.sprites[u.sprite];
+      // While moving, a sprite that has a walk cut plays it; one that doesn't falls back to
+      // its idle loop, which idleFrame already runs faster for a moving unit.
+      const walk = atk == null && moving ? this.art.walks[u.sprite] : undefined;
+      const frames = atk != null ? this.art.attacks[u.sprite] : walk ?? idle ?? this.art.sprites[u.sprite];
       const n = frames?.length ?? 0;
       const fi = atk != null ? atk : this.idleFrame(u, n || 4);
       const walkDirs = moving ? this.art.walkDirs[u.sprite] : undefined;

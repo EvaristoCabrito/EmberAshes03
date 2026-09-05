@@ -38,6 +38,7 @@ export type TerrainId = "plains" | "woods" | "ruins" | "water" | "ember" | "hill
  * BattleEngine.provoke) and starts acting from the following round. Nothing turns back. */
 export type Side = "player" | "enemy" | "neutral";
 export type ClassId =
+  | "ancientGolem"
   | "swordsman"
   | "archer"
   | "mage"
@@ -73,7 +74,7 @@ export type ClassId =
   // computed live from its summoner (see castSummonFamiliar), CLASSES.familiar only
   // supplies a sprite/size/range fallback and satisfies the ClassId-keyed tables below.
   | "familiar";
-export type SpriteId = "kael" | "nira" | "voss" | "salazar" | "malrec" | "aldric" | "soldier" | "brigand" | "captain" | "sorcerer" | "horror" | "Asherah" | "pikeman" | "wardog" | "troll" | "familiar" | "swamp-blue-calf";
+export type SpriteId = "kael" | "nira" | "voss" | "salazar" | "malrec" | "aldric" | "soldier" | "brigand" | "captain" | "sorcerer" | "horror" | "Asherah" | "pikeman" | "wardog" | "troll" | "familiar" | "swamp-blue-calf" | "ancient-golem";
 export type HealId = "cureMinor" | "cureWounds";
 export type SpellKind =
   | "fireball"
@@ -511,6 +512,10 @@ export interface GameArt {
   decorations: Record<string, HTMLImageElement>;
   sprites: Record<SpriteId, HTMLImageElement[]>;
   attacks: Partial<Record<SpriteId, HTMLImageElement[]>>;
+  /** Walk cycles, for the sprites that have one cut. Played only while a unit is actually
+   * moving; a sprite without one keeps falling back to its idle loop run faster, which is
+   * what every sprite did before walk cycles existed. */
+  walks: Partial<Record<SpriteId, HTMLImageElement[]>>;
   idles: Partial<Record<SpriteId, HTMLImageElement[]>>;
   walkDirs: Partial<Record<SpriteId, WalkDirs>>;
   impact: HTMLImageElement[];

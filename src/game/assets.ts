@@ -35,7 +35,7 @@ export function tileVariantSrc(id: TerrainId, variant: number): string {
   return `/game/tiles/${tileVariantName(id, variant)}.png?v=16`;
 }
 const TILES = Object.keys(TILE_VARIANT_COUNT) as TerrainId[];
-const SPRITES: SpriteId[] = ["kael", "nira", "voss", "salazar", "malrec", "aldric", "soldier", "brigand", "captain", "sorcerer", "horror", "Asherah", "pikeman", "wardog", "troll", "familiar", "swamp-blue-calf"];
+const SPRITES: SpriteId[] = ["kael", "nira", "voss", "salazar", "malrec", "aldric", "soldier", "brigand", "captain", "sorcerer", "horror", "Asherah", "pikeman", "wardog", "troll", "familiar", "swamp-blue-calf", "ancient-golem"];
 
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -55,10 +55,11 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-// The familiar's new sprites are a 12-frame idle like the heroes'. Its old set was 44
-// frames of a much rougher cut; loadGameArt rejects on any missing file, so this count and
-// what is on disk have to move together.
-const HERO_IDLE = new Set<SpriteId>(["kael", "nira", "voss", "salazar", "horror", "Asherah", "familiar"]);
+// Sprites cut as a 12-frame idle rather than the 4-frame default — the heroes, the two
+// big horrors, and the two creatures cut from reference video (familiar, ancient golem).
+// loadGameArt rejects on any missing file, so this set and what is on disk have to move
+// together.
+const HERO_IDLE = new Set<SpriteId>(["kael", "nira", "voss", "salazar", "horror", "Asherah", "familiar", "ancient-golem"]);
 
 export async function loadGameArt(): Promise<GameArt> {
   const tiles = {} as Record<TerrainId, HTMLImageElement[]>;
@@ -94,11 +95,25 @@ export async function loadGameArt(): Promise<GameArt> {
     malrec: { n: 4, bust: "" },
     aldric: { n: 4, bust: "" },
     familiar: { n: 8, bust: "?v=6" },
+    "ancient-golem": { n: 8, bust: "" },
   };
   await Promise.all(
     (Object.keys(ATTACK_FRAMES) as SpriteId[]).map(async (id) => {
       const { n, bust } = ATTACK_FRAMES[id]!;
       attacks[id] = await Promise.all(Array.from({ length: n }, (_, i) => loadImage(`/game/sprites/${id}/atk-${i + 1}.png${bust}`)));
+    }),
+  );
+  // Walk cycles: move-*.png, same shape as the attack table. A sprite absent from here has
+  // no walk cut and falls back to its idle loop played faster, as every sprite used to.
+  const WALK_FRAMES: Partial<Record<SpriteId, { n: number; bust: string }>> = {
+    familiar: { n: 8, bust: "?v=6" },
+    "ancient-golem": { n: 8, bust: "" },
+  };
+  const walks: Partial<Record<SpriteId, HTMLImageElement[]>> = {};
+  await Promise.all(
+    (Object.keys(WALK_FRAMES) as SpriteId[]).map(async (id) => {
+      const { n, bust } = WALK_FRAMES[id]!;
+      walks[id] = await Promise.all(Array.from({ length: n }, (_, i) => loadImage(`/game/sprites/${id}/move-${i + 1}.png${bust}`)));
     }),
   );
   const impact = await Promise.all([1, 2, 3, 4].map((n) => loadImage(`/game/fx/impact-${n}.png`)));
@@ -115,5 +130,5 @@ export async function loadGameArt(): Promise<GameArt> {
       side: await loadImage("/game/sprites/kael/walk-side.png"),
     },
   };
-  return { tiles, decorations, sprites, attacks, idles, walkDirs, impact, backdrops };
+  return { tiles, decorations, sprites, attacks, walks, idles, walkDirs, impact, backdrops };
 }

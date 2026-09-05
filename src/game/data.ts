@@ -328,6 +328,29 @@ export const CLASSES: Record<ClassId, ClassDef> = {
     footprintOffsets: FOOTPRINT_TYPE_8,
     init: 7,
   },
+  // A stone construct on the troll's footprint — same 320x320 cut, same FOOTPRINT_TYPE_8
+  // block, so it draws and occupies exactly like one. Slower and harder than the troll but
+  // it hits for less: it is meant to be an obstacle that has to be gone through, not a
+  // damage race. Its charge-up attack animation belongs to a beam the reference video could
+  // not be cut from (see the sprite folder's README), so it swings at reach for now. These
+  // numbers are a first pass — no scenario places one yet.
+  ancientGolem: {
+    id: "ancientGolem",
+    name: "Golem Ancião",
+    role: "Construto",
+    hp: 104,
+    atk: 10,
+    mag: 0,
+    def: 13,
+    res: 8,
+    mov: 2,
+    minRange: 1,
+    maxRange: 2,
+    sprite: "ancient-golem",
+    size: 4,
+    footprintOffsets: FOOTPRINT_TYPE_8,
+    init: 9,
+  },
   troll: {
     id: "troll",
     name: "Troll da caverna",
@@ -647,6 +670,7 @@ export const GROWTH: Record<ClassId, { hp: number; atk: number; mag: number; def
   horror: { hp: 4, atk: 2, mag: 0, def: 2, res: 2 },
   asherah: { hp: 5, atk: 2, mag: 0, def: 2, res: 2 },
   troll: { hp: 5, atk: 2, mag: 0, def: 2, res: 1 },
+  ancientGolem: { hp: 6, atk: 1, mag: 0, def: 3, res: 2 },
   swampBlueCalf: { hp: 3, atk: 2, mag: 0, def: 1, res: 1 },
   assassin: { hp: 3, atk: 3, mag: 0, def: 1, res: 1 },
   rogue: { hp: 3, atk: 2, mag: 0, def: 1, res: 1 },
