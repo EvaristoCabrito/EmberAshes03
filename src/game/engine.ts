@@ -1,4 +1,4 @@
-import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, CURE_DISEASE, CURES, DECORATIONS, DISEASE, DOUBLE_STRIKE, EMPTY_BAG, EQUIPMENT, EXP_TO_LEVEL, expForHit, FIREBALL, FOOTPRINT_TYPE_7, FOOTPRINT_TYPE_8, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, MAGIC_MISSILE, magicMissileCount, MAX_LEVEL, PIERCING, PIERCING_THRUST, POTION_CARRY_MAX, POTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, WEAPON_MAX_ENH, WEAPONS, WEB_OF_DREAMS, cureSpan, decorationCells, diceFormula, effectiveMaxRange, enemyLevelFor, fireballFormula, fireballOrigin, fireballPower, fireballRangeTiles, fireballTiles, hexAreaTiles, isProjectile, isSummonClass, lightningDice, lightningFormula, missionGearLevel, parseLayout, potionLabel, rollCure, rollDice, rollPotion, spellFormula, spellTier, starterWeaponFor, STARTING_BAG, statsFor, terrainNote, TERRAIN, tierKey, tierUses, gearStatBonus, offHandBlocked, weaponRoll, weightedLootPick, weightedPotionPick, weightedWeaponPick } from "./data";
+import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, CURE_DISEASE, CURES, DECORATIONS, DISEASE, DOUBLE_STRIKE, EMPTY_BAG, EQUIPMENT, EXP_TO_LEVEL, expForHit, FIREBALL, FOOTPRINT_TYPE_7, FOOTPRINT_TYPE_8, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, MAGIC_MISSILE, magicMissileCount, MAX_LEVEL, PIERCING, PIERCING_THRUST, POTION_CARRY_MAX, POTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, WEAPON_MAX_ENH, WEAPONS, WEB_OF_DREAMS, cureSpan, barricadeDecor, decorationCells, diceFormula, effectiveMaxRange, enemyLevelFor, fireballFormula, fireballOrigin, fireballPower, fireballRangeTiles, fireballTiles, hexAreaTiles, isProjectile, isSummonClass, lightningDice, lightningFormula, missionGearLevel, parseLayout, potionLabel, rollCure, rollDice, rollPotion, spellFormula, spellTier, starterWeaponFor, STARTING_BAG, statsFor, terrainNote, TERRAIN, tierKey, tierUses, gearStatBonus, offHandBlocked, weaponRoll, weightedLootPick, weightedPotionPick, weightedWeaponPick } from "./data";
 import type { SpellTier } from "./data";
 import { canCounter, makeForecast, mulberry32, powerOf, protOf, rollDamage, rollDamageCustom } from "./combat";
 import {
@@ -502,12 +502,18 @@ export class BattleEngine {
       if (ITEM_DECO.has(p.id)) continue;
       const def = DECORATIONS[p.id];
       if (!def) continue;
+      // A decoration declares the terrain it stands on (DecorationDef.tile) so the art and
+      // the rules cannot disagree: a house reads climbable and IS climbable, a barricade is
+      // barricade terrain and keeps the shoot-from-behind and troll rules. Only a prop that
+      // names no terrain of its own falls back to solid rock.
+      const under = def.tile ?? "column";
       for (const { dx, dy } of def.footprint) {
         const x = p.x + dx;
         const y = p.y + dy;
-        if (x >= 0 && x < this.cols && y >= 0 && y < this.rows) this.tiles[y * this.cols + x] = "column";
+        if (x >= 0 && x < this.cols && y >= 0 && y < this.rows) this.tiles[y * this.cols + x] = under;
       }
     }
+    this.decorations.push(...barricadeDecor(this.tiles, this.cols, this.rows, this.decorations));
     this.rng = mulberry32(seed + mission.index * 97);
     this.units = [
       ...mission.playerSpawns.map((s, i) => spawnUnit(s, "player", i, roster)),
@@ -1418,6 +1424,12 @@ export class BattleEngine {
         const i = c.y * this.cols + c.x;
         if (this.tiles[i] !== "barricade") continue;
         this.tiles[i] = fill;
+        // The prop goes with the terrain — leaving it would draw a barricade over ground
+        // that is now walkable.
+        for (let d = this.decorations.length - 1; d >= 0; d--) {
+          const dec = this.decorations[d];
+          if (dec.id === "barricade" && dec.x === c.x && dec.y === c.y) this.decorations.splice(d, 1);
+        }
         n += 1;
         this.emitParticle({
           x: c.x,
@@ -3438,39 +3450,6 @@ export class BattleEngine {
     }
   }
 
-  private drawBarricadeMark(ctx: CanvasRenderingContext2D, cx: number, cy: number, tile: number): void {
-    ctx.save();
-    ctx.fillStyle = "rgba(58, 32, 18, 0.38)";
-    this.hexPath(ctx, cx, cy, tile * 0.9);
-    ctx.fill();
-    ctx.strokeStyle = "rgba(196, 148, 96, 0.95)";
-    ctx.lineWidth = Math.max(2, tile * 0.08);
-    this.hexPath(ctx, cx, cy, tile * 0.82);
-    ctx.stroke();
-    const w = tile * 0.08;
-    ctx.strokeStyle = "#d4b08a";
-    ctx.lineWidth = Math.max(2.2, w);
-    ctx.lineCap = "round";
-    for (let i = -2; i <= 2; i++) {
-      const sx = cx + i * tile * 0.16;
-      ctx.beginPath();
-      ctx.moveTo(sx, cy + tile * 0.3);
-      ctx.lineTo(sx, cy - tile * 0.34);
-      ctx.stroke();
-    }
-    ctx.strokeStyle = "#8a5230";
-    ctx.lineWidth = Math.max(2.4, tile * 0.07);
-    ctx.beginPath();
-    ctx.moveTo(cx - tile * 0.4, cy - tile * 0.04);
-    ctx.lineTo(cx + tile * 0.4, cy - tile * 0.04);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(cx - tile * 0.38, cy + tile * 0.12);
-    ctx.lineTo(cx + tile * 0.38, cy + tile * 0.12);
-    ctx.stroke();
-    ctx.restore();
-  }
-
   private footprintCentroid(
     x: number,
     y: number,
@@ -3650,11 +3629,6 @@ export class BattleEngine {
       ctx.translate((Math.random() - 0.5) * 10 * shake, (Math.random() - 0.5) * 10 * shake);
     }
 
-    // Barricade marks draw in a separate pass after decorations (below) so a barricade
-    // always reads in front of a decoration sitting next to it, never the other way
-    // around — a decoration's image spills past its own hex (a deliberate fringe margin,
-    // see drawDecorations) and would otherwise paint over a barricade drawn earlier.
-    const barricades: { cx: number; cy: number }[] = [];
     for (let y = 0; y < this.rows; y++) {
       for (let x = 0; x < this.cols; x++) {
         const { cx, cy } = this.hexCenter(x, y);
@@ -3677,7 +3651,6 @@ export class BattleEngine {
     }
 
     this.drawDecorations(ctx, tile, cssW, cssH);
-    for (const { cx, cy } of barricades) this.drawBarricadeMark(ctx, cx, cy, tile);
 
 
     // Every selectable area (walkable ground, spell range, an aimed AoE) gets the same

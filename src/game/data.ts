@@ -85,6 +85,11 @@ export const DECORATIONS: Record<string, DecorationDef> = {
   watchtower: { id: "watchtower", name: "Torre de Vigia", footprint: DECO_PAIR },
   "ancient-shrine": { id: "ancient-shrine", name: "Santuário Antigo", footprint: DECO_PAIR },
   "locked-chest": { id: "locked-chest", name: "Baú trancado", footprint: DECO_ONE },
+  // A prop, not a hex type: it lays "barricade" terrain under itself and every barricade
+  // rule rides on that tile — impassable except to a troll (at cost 2, which also smashes
+  // it), blocks shots, and lets whoever stands right behind it shoot over while staying
+  // unhittable through it.
+  barricade: { id: "barricade", name: "Barricada", footprint: DECO_ONE, tile: "barricade" },
 };
 
 export function decorationImage(id: string): string {
@@ -94,6 +99,29 @@ export function decorationImage(id: string): string {
 /** Every hex a placed decoration's footprint covers — impassable and blocks line of
  * sight, independent of the terrain tile underneath (per user: "half covered is not a
  * walking path"). */
+/** Barricade props for every bare "barricade" tile that hasn't got one.
+ *
+ * Barricades are authored as terrain — the "b" of a hand-written layout, and what
+ * scatterTactics paints — but they are a decoration now. Rather than rewrite every map that
+ * ever placed one, the two meet here: the tile stays the source of truth for the rules, and
+ * the prop that belongs on it is derived wherever a board is loaded or generated. */
+export function barricadeDecor(
+  tiles: TerrainId[],
+  cols: number,
+  rows: number,
+  existing: { id: string; x: number; y: number }[],
+): DecorationPlacement[] {
+  const out: DecorationPlacement[] = [];
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      if (tiles[y * cols + x] !== "barricade") continue;
+      if (existing.some((d) => d.id === "barricade" && d.x === x && d.y === y)) continue;
+      out.push({ id: "barricade", x, y });
+    }
+  }
+  return out;
+}
+
 export function decorationCells(placements: { id: string; x: number; y: number }[]): Set<string> {
   const out = new Set<string>();
   for (const p of placements) {
