@@ -2361,20 +2361,23 @@ function expandMaps(missions: Mission[]): Mission[] {
       layout.push(wide, wide);
     }
     const place = <T extends { x: number; y: number }>(s: T): T => ({ ...s, x: s.x * 2, y: s.y * 2 });
-    return stampTactics({
+    const doubled = {
       ...m,
       cols: m.cols * 2,
       rows: m.rows * 2,
       layout,
       playerSpawns: m.playerSpawns.map(place),
       enemySpawns: m.enemySpawns.map(place),
-    });
+    };
+    // The scatter is a helper, not a law: a map that placed its own terrain opts out and
+    // loads exactly as authored.
+    return m.autoTactics === false ? doubled : scatterTactics(doubled);
   });
 }
 
 /** The six neighbor cells of an odd-r offset hex grid coordinate, as absolute [x, y] pairs
  * — the one copy of this offset table for the whole file (it was previously re-declared
- * three separate times: twice inline in stampTactics, once more for decorateOpenTerrain's
+ * three separate times: twice inline in scatterTactics, once more for decorateOpenTerrain's
  * flood-fill/connectivity checks below). */
 function hexAdj(x: number, y: number): [number, number][] {
   const even: [number, number][] = [[1, 0], [0, -1], [-1, -1], [-1, 0], [-1, 1], [0, 1]];
@@ -2390,7 +2393,12 @@ function oddrDist(ax: number, ay: number, bx: number, by: number): number {
   return (Math.abs(aq - bq) + Math.abs(ar - br) + Math.abs(-aq - ar - (-bq - br))) / 2;
 }
 
-function stampTactics(m: Mission): Mission {
+/** Scatters barricades, hills and high-terrain variants over a map.
+ *
+ * This is the generator: it runs on load for any mission that has not opted out
+ * (Mission.autoTactics), and the Map Editor calls it directly so a blank map can be filled
+ * with something to react to and then cleaned up by hand. Exported for that second use. */
+export function scatterTactics(m: Mission): Mission {
   const tiles = parseLayout(m.layout);
   const blocked = new Set<string>();
   const mark = (x: number, y: number) => blocked.add(`${x},${y}`);
@@ -2593,7 +2601,7 @@ function rockifyColumns(mission: Mission): Mission {
 // Local seeded RNG for decorateOpenTerrain below — deliberately NOT imported from
 // combat.ts, since it imports from data.ts already and importing back would create a
 // circular module dependency. hexAdj above is the shared neighbor-offset helper both this
-// section and stampTactics use.
+// section and scatterTactics use.
 function mulberry32Local(seed: number): () => number {
   let a = seed | 0;
   return () => {

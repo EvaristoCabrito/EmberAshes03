@@ -181,6 +181,11 @@ export interface Mission {
   playerSpawns: Spawn[];
   enemySpawns: Spawn[];
   hub?: boolean;
+  /** Whether stampTactics dresses this map — the pass that scatters barricades, hills and
+   * the high-terrain variants over it after the layout is doubled. On unless a map says
+   * otherwise, so nothing already shipped changes; turn it off on a map placed by hand,
+   * where the scatter would paint over deliberate work. */
+  autoTactics?: boolean;
   /** Which art variant to use per tile, row-major, same indexing as layout flattened.
    * Missing/undefined index or omitted array entirely means variant 0 (the default) —
    * existing missions never set this and keep rendering exactly as before. */

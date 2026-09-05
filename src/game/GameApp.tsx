@@ -6,7 +6,7 @@ import { installAudioUnlock, playMenuMusic, playTheme, resumeAudio, setMuted, sf
 import { BattleCanvas } from "./BattleCanvas";
 import { InnScreen } from "./InnScreen";
 import { BackpackScreen, PaperDollScreen } from "./InventoryScreens";
-import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, CURE_DISEASE, CURES, DECORATIONS, DOUBLE_STRIKE, EQUIPMENT, EXP_TO_LEVEL, FIREBALL, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, MAGIC_MISSILE, PIERCING, PIERCING_THRUST, MAX_LEVEL, POTIONS, POTION_LOOT_WEIGHT, PROMOTE_LEVEL, PROMOTED_BASE, PROMOTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, TERRAIN, WEAPONS, WEAPON_MAX_ENH, WEB_OF_DREAMS, BAG_MAX, LOCKPICK_PRICE, POTION_CARRY_MAX, POTION_PRICE, decorationCells, decorationImage, diceFormula, emberForKill, enemyLevelFor, equippedPouchId, fireballFormula, lightningFormula, parseLayout, potionLabel, pouchIcon, rangeLabel, sheetLine, spellTier, startingBags, statsFor, terrainNote, tierKey, tierUses, weaponEnhCost, weaponSellValue, type SpellTier } from "./data";
+import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, CURE_DISEASE, CURES, DECORATIONS, DOUBLE_STRIKE, EQUIPMENT, EXP_TO_LEVEL, FIREBALL, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, MAGIC_MISSILE, PIERCING, PIERCING_THRUST, MAX_LEVEL, POTIONS, POTION_LOOT_WEIGHT, PROMOTE_LEVEL, PROMOTED_BASE, PROMOTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, TERRAIN, WEAPONS, WEAPON_MAX_ENH, WEB_OF_DREAMS, BAG_MAX, LOCKPICK_PRICE, POTION_CARRY_MAX, POTION_PRICE, decorationCells, decorationImage, diceFormula, emberForKill, enemyLevelFor, equippedPouchId, fireballFormula, lightningFormula, parseLayout, scatterTactics, potionLabel, pouchIcon, rangeLabel, sheetLine, spellTier, startingBags, statsFor, terrainNote, tierKey, tierUses, weaponEnhCost, weaponSellValue, type SpellTier } from "./data";
 import { BattleEngine } from "./engine";
 import { WorldMapScreen } from "./WorldMapScreen";
 import { DISPLAY_VERSION } from "./version";
@@ -1518,6 +1518,7 @@ function blankDraft(): MapDraft {
     objective: "Derrote todos os inimigos",
     win: "rout",
     hub: false,
+    autoTactics: true,
     locationId: "",
     cols: EDITOR_COLS_DEFAULT,
     rows: EDITOR_ROWS_DEFAULT,
@@ -1545,6 +1546,7 @@ function missionToDraft(m: Mission): MapDraft {
     objective: m.objective,
     win: m.win,
     hub: !!m.hub,
+    autoTactics: m.autoTactics !== false,
     locationId: locationForMission(m.id)?.id ?? "",
     cols: m.cols,
     rows: m.rows,
@@ -2030,6 +2032,25 @@ function MapEditorScreen({
           <Button variant="ghost" size="sm" onClick={() => setShowLocations(true)}>
             Locais
           </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            title="Espalha barricadas, barrancos e terreno alto pelo mapa do tamanho atual — depois é só limpar o que não serve"
+            onClick={() => {
+              // The same pass the campaign runs on load, aimed at the map in hand: fill the
+              // board with something to react to, then clear what does not belong.
+              const filled = scatterTactics(draftToMission({ ...draft, autoTactics: true }));
+              const tiles = parseLayout(filled.layout);
+              setDraft((d) => ({
+                ...d,
+                tiles,
+                tileVariants: tiles.map((t, i) => Math.min(d.tileVariants[i] ?? 0, (TILE_VARIANT_COUNT[t] ?? 1) - 1)),
+              }));
+              setNote(`Terreno gerado em ${draft.cols}x${draft.rows} — apague o que não servir e salve.`);
+            }}
+          >
+            Gerar terreno
+          </Button>
           <select
             className="bg-bg border border-border rounded-md px-2 py-1.5"
             value=""
@@ -2182,6 +2203,21 @@ function MapEditorScreen({
           <label className="flex items-center gap-2 mt-5">
             <input type="checkbox" checked={draft.hub} onChange={(e) => setDraft((d) => ({ ...d, hub: e.target.checked }))} />
             <span className="text-muted">É um hub (sem combate)</span>
+          </label>
+          <label className="flex items-center gap-2" title="Barricadas, barrancos e variantes de terreno alto espalhados por cima do mapa depois que ele carrega">
+            <input
+              type="checkbox"
+              checked={draft.autoTactics}
+              onChange={(e) => {
+                setDraft((d) => ({ ...d, autoTactics: e.target.checked }));
+                setNote(
+                  e.target.checked
+                    ? "Terreno automático ligado — barricadas e barrancos entram por cima do que você pintou."
+                    : "Terreno automático desligado — o mapa carrega exatamente como está pintado.",
+                );
+              }}
+            />
+            <span className="text-muted">Terreno automático</span>
           </label>
         </div>
 
