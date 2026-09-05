@@ -6,7 +6,7 @@ import { installAudioUnlock, playMenuMusic, playTheme, resumeAudio, setMuted, sf
 import { BattleCanvas } from "./BattleCanvas";
 import { InnScreen } from "./InnScreen";
 import { BackpackScreen, PaperDollScreen } from "./InventoryScreens";
-import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, CURE_DISEASE, CURES, DECORATIONS, DOUBLE_STRIKE, EQUIPMENT, EXP_TO_LEVEL, FIREBALL, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, MAGIC_MISSILE, PIERCING, PIERCING_THRUST, MAX_LEVEL, POTIONS, POTION_LOOT_WEIGHT, PROMOTE_LEVEL, PROMOTED_BASE, PROMOTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, TERRAIN, WEAPONS, WEAPON_MAX_ENH, WEB_OF_DREAMS, BAG_MAX, LOCKPICK_PRICE, POTION_CARRY_MAX, POTION_PRICE, decorationCells, decorationImage, diceFormula, emberForKill, enemyLevelFor, equippedPouchId, fireballFormula, lightningFormula, dressMap, parseLayout, potionLabel, pouchIcon, rangeLabel, sheetLine, spellTier, startingBags, statsFor, terrainNote, tierKey, tierUses, weaponEnhCost, weaponSellValue, type SpellTier } from "./data";
+import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, CURE_DISEASE, CURES, DECORATIONS, DOUBLE_STRIKE, EQUIPMENT, EXP_TO_LEVEL, FIREBALL, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, MAGIC_MISSILE, PIERCING, PIERCING_THRUST, MAX_LEVEL, POTIONS, POTION_LOOT_WEIGHT, PROMOTE_LEVEL, PROMOTED_BASE, PROMOTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, TERRAIN, WEAPONS, WEAPON_MAX_ENH, WEB_OF_DREAMS, BAG_MAX, LOCKPICK_PRICE, POTION_CARRY_MAX, POTION_PRICE, decorationCells, decorationImage, diceFormula, emberForKill, enemyLevelFor, equippedPouchId, fireballFormula, lightningFormula, dressMap, parseLayout, potionLabel, pouchIcon, rangeLabel, sheetLine, spellFormula, spellTier, startingBags, statsFor, terrainNote, tierKey, tierUses, weaponEnhCost, weaponSellValue, type SpellTier } from "./data";
 import { BattleEngine } from "./engine";
 import { WorldMapScreen } from "./WorldMapScreen";
 import { DISPLAY_VERSION } from "./version";
@@ -1228,11 +1228,14 @@ const POTION_LOOT_ROWS: { name: string; weight: number }[] = (Object.entries(POT
 const POTION_LOOT_TOTAL = POTION_LOOT_ROWS.reduce((n, r) => n + r.weight, 0);
 
 /** One entry per skill/spell tier slot (SPELL_TIER's own keys) — tier, damage formula (a
- * plain string for flat skills, or a function of level for the two that scale), and a
- * one-line effect note. Kept next to SPELL_TIER by hand since a skill's shape (splash, line,
- * status effect) isn't data SPELL_TIER itself carries. */
-const SKILL_DAMAGE_ROWS: { name: string; tier: SpellTier; formula: string | ((level: number) => string); note: string }[] = [
-  { name: MAGIC_MISSILE.name, tier: spellTier("magicMissile")!, formula: diceFormula(MAGIC_MISSILE.dice, MAGIC_MISSILE.faces, MAGIC_MISSILE.bonus), note: "Nunca erra." },
+ * plain string for flat skills, or a function of the caster's MAG for the ones that scale),
+ * and a one-line effect note. Kept next to SPELL_TIER by hand since a skill's shape
+ * (splash, line, status effect) isn't data SPELL_TIER itself carries.
+ *
+ * The scaling ones take MAG rather than level: a spell weights the caster's own power now
+ * instead of growing on a table of its own. */
+const SKILL_DAMAGE_ROWS: { name: string; tier: SpellTier; formula: string | ((mag: number) => string); note: string }[] = [
+  { name: MAGIC_MISSILE.name, tier: spellTier("magicMissile")!, formula: (mag: number) => spellFormula(mag, MAGIC_MISSILE.mul, MAGIC_MISSILE.dice, MAGIC_MISSILE.faces, MAGIC_MISSILE.bonus), note: "Nunca erra. 1 míssil, 2 no nível 3, 3 no nível 6 — um alvo cada." },
   { name: LONG_SHOT.name, tier: spellTier("longShot")!, formula: `arma +${diceFormula(LONG_SHOT.bonusDice, LONG_SHOT.bonusFaces, LONG_SHOT.bonus)}`, note: `Alcance ×${LONG_SHOT.rangeMul}+${LONG_SHOT.rangeBonus}.` },
   { name: CURES.cureMinor.name, tier: spellTier("cureMinor")!, formula: `${diceFormula(CURES.cureMinor.dice, CURES.cureMinor.faces, CURES.cureMinor.bonus)} (cura)`, note: "—" },
   { name: DOUBLE_STRIKE.name, tier: spellTier("doubleStrike")!, formula: "2× dano de arma", note: "Ataca duas vezes." },
@@ -1241,8 +1244,8 @@ const SKILL_DAMAGE_ROWS: { name: string; tier: SpellTier; formula: string | ((le
   {
     name: LIGHTNING.name,
     tier: spellTier("lightning")!,
-    formula: (level: number) => lightningFormula(level),
-    note: `Eco em outro alvo adjacente: ${diceFormula(LIGHTNING.echoDice, LIGHTNING.echoFaces, LIGHTNING.echoBonus)}. Nv8+: mais 2 dados.`,
+    formula: (mag: number) => lightningFormula(mag),
+    note: `Eco em outro alvo adjacente: ${diceFormula(LIGHTNING.echoDice, LIGHTNING.echoFaces, LIGHTNING.echoBonus)}.`,
   },
   { name: PIERCING.name, tier: spellTier("piercing")!, formula: `${PIERCING.dmgMul}× dano de arma`, note: "—" },
   { name: CURES.cureWounds.name, tier: spellTier("cureWounds")!, formula: `${diceFormula(CURES.cureWounds.dice, CURES.cureWounds.faces, CURES.cureWounds.bonus)} (cura)`, note: "—" },
@@ -1258,15 +1261,16 @@ const SKILL_DAMAGE_ROWS: { name: string; tier: SpellTier; formula: string | ((le
   {
     name: FIREBALL.name,
     tier: spellTier("fireball")!,
-    formula: (level: number) => fireballFormula(level),
-    note: "Nv5+: dados maiores. Nv9+: maiores ainda. Área de raio 2.",
+    formula: (mag: number) => fireballFormula(mag),
+    note: `Área de raio ${FIREBALL.size}.`,
   },
   { name: CURE_DISEASE.name, tier: spellTier("cureDisease")!, formula: "—", note: "Cura doença." },
   {
     name: CAUSTIC_VENOM.name,
     tier: spellTier("causticVenom")!,
-    formula: `centro ${diceFormula(CAUSTIC_VENOM.centerDice, CAUSTIC_VENOM.centerFaces, CAUSTIC_VENOM.centerBonus)} · respingo ${diceFormula(CAUSTIC_VENOM.splashDice, CAUSTIC_VENOM.splashFaces, CAUSTIC_VENOM.splashBonus)}`,
-    note: "Envenena: 1D4 no início de cada turno do alvo, até curado. Área de raio 2.",
+    formula: (mag: number) =>
+      `centro ${spellFormula(mag, CAUSTIC_VENOM.centerMul, CAUSTIC_VENOM.centerDice, CAUSTIC_VENOM.centerFaces, CAUSTIC_VENOM.centerBonus)} · respingo ${spellFormula(mag, CAUSTIC_VENOM.splashMul, CAUSTIC_VENOM.splashDice, CAUSTIC_VENOM.splashFaces, CAUSTIC_VENOM.splashBonus)}`,
+    note: `Envenena: 1D4 no início de cada turno do alvo, até curado. Área de raio ${CAUSTIC_VENOM.size}, pega os dois lados.`,
   },
 ].sort((a, b) => a.tier - b.tier);
 
@@ -1364,10 +1368,22 @@ function HelpModal({ onClose }: { onClose: () => void }) {
           </div>
         ) : tab === "dano" ? (
           <div className="space-y-5">
-            <p className="text-sm text-muted leading-relaxed">
-              Fórmula de dano (ou efeito) de cada magia/habilidade, por tier. Relâmpago e Bola de Fogo
-              escalam com o nível de quem conjura — a tabela mostra Nv 1, 5, 9 e 30 pra ver a curva inteira.
-            </p>
+            <div className="space-y-2">
+              <p className="text-sm leading-relaxed">
+                <span className="text-accent">Ataque normal</span> = metade do seu ATK (ou MAG, se for
+                conjurador) + dados da arma + terreno − metade da DEF do alvo (RES, contra magia).
+                Metades não contam: arredonda pra baixo. Mínimo 1 de dano.
+              </p>
+              <p className="text-sm leading-relaxed">
+                <span className="text-accent">Magia</span> = a mesma conta, com a sua metade de MAG
+                multiplicada pelo peso da magia e os dados dela no lugar da arma. Todo peso é maior que 1,
+                e o resultado nunca fica abaixo de um ataque normal — conjurar sempre vale mais que bater.
+              </p>
+              <p className="text-xs text-muted leading-relaxed">
+                Por isso a tabela abaixo mostra a fórmula por MAG, não por nível: uma magia cresce junto
+                com quem conjura, não numa tabela própria.
+              </p>
+            </div>
             <div className="overflow-x-auto">
               <table className="w-full text-xs border-collapse">
                 <thead>
@@ -1388,10 +1404,9 @@ function HelpModal({ onClose }: { onClose: () => void }) {
                           row.formula
                         ) : (
                           <span className="space-x-1.5">
-                            <span>Nv1: {row.formula(1)}</span>
-                            <span className="text-muted">· Nv5: {row.formula(5)}</span>
-                            <span className="text-muted">· Nv9: {row.formula(9)}</span>
-                            <span className="text-muted">· Nv30: {row.formula(30)}</span>
+                            <span>MAG 10: {row.formula(10)}</span>
+                            <span className="text-muted">· MAG 20: {row.formula(20)}</span>
+                            <span className="text-muted">· MAG 40: {row.formula(40)}</span>
                           </span>
                         )}
                       </td>
@@ -3658,7 +3673,7 @@ function StatusPanel({ unit, bagIcon, onClose, onOpenInventory, onOpenEquipment 
                         <div className="flex items-center gap-1.5 bg-bg border border-border rounded-md px-2 py-1.5">
                           <img src="/game/icons/lightning.png?v=ds2" alt="" className="size-5 rounded-sm object-cover shrink-0" />
                           <p className="text-xs truncate">
-                            Raio {lightningFormula(unit.level)} <span className="tabular-nums text-muted">×{unit.spells[tierKey(spellTier("lightning")!)]}</span>
+                            Raio {lightningFormula(unit.mag)} <span className="tabular-nums text-muted">×{unit.spells[tierKey(spellTier("lightning")!)]}</span>
                           </p>
                         </div>
                       )}
@@ -3666,7 +3681,7 @@ function StatusPanel({ unit, bagIcon, onClose, onOpenInventory, onOpenEquipment 
                         <div className="flex items-center gap-1.5 bg-bg border border-border rounded-md px-2 py-1.5">
                           <img src="/game/icons/fireball.png?v=ds2" alt="" className="size-5 rounded-sm object-cover shrink-0" />
                           <p className="text-xs truncate">
-                            Fogo {fireballFormula(unit.level)} <span className="tabular-nums text-muted">×{unit.spells[tierKey(spellTier("fireball")!)]}</span>
+                            Fogo {fireballFormula(unit.mag)} <span className="tabular-nums text-muted">×{unit.spells[tierKey(spellTier("fireball")!)]}</span>
                           </p>
                         </div>
                       )}

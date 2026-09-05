@@ -1347,29 +1347,38 @@ export function potionSpan(kind: PotionId): string {
   return diceFormula(p.dice, p.faces, p.bonus);
 }
 
+/** Spell multipliers weight the caster's own power (see spellDamage in engine.ts). All are
+ * above 1, so a cast always beats the plain hit the same unit could have made, and because
+ * they scale the stat rather than sitting beside it the spells keep their order apart as
+ * MAG climbs instead of all converging on it. The dice are small on purpose: they are there
+ * so damage varies between casts, not to carry the spell. */
 export const FIREBALL = {
   name: "Bola De Fogo",
   size: 2,
   range: 4,
-  dice: 2,
-  faces: 8,
-  bonus: 4,
+  dice: 1,
+  faces: 6,
+  bonus: 0,
+  mul: 1.35,
 };
 
 export const CAUSTIC_VENOM = {
   name: "Veneno Cáustico",
-  // Same radius-2 splash shape as Fireball (reuses fireballOrigin/fireballTiles) — the
+  // Its own radius, wider than Fireball's. It used to reuse fireballTiles, which hardcodes
+  // FIREBALL.size, so venom had no radius of its own to change — the
   // clicked point takes the bigger centerDice roll, every other unit caught in the splash
   // (either side — it spares no one) takes the smaller splashDice roll, and every landed
   // hit poisons its target: 1D4 at the start of each of their own turns until cured by
   // Cure Disease or the disease potion (see startOfTurnEffects/curePlayerDisease).
-  size: 2,
+  size: 3,
   range: 4,
-  centerDice: 4,
-  centerFaces: 8,
+  centerDice: 1,
+  centerFaces: 6,
   centerBonus: 0,
-  splashDice: 2,
-  splashFaces: 8,
+  centerMul: 1.5,
+  splashDice: 1,
+  splashFaces: 4,
+  splashMul: 1.1,
   splashBonus: 0,
 };
 
@@ -1428,11 +1437,11 @@ export const CLEAVE = {
 export const MAGIC_MISSILE = {
   name: "Míssil Mágico",
   range: 4,
-  // 3d4 per missile, plus the caster's own MAG — the flat +3 it used to carry is gone, so
-  // the spell grows with the mage instead of staying where it started.
-  dice: 3,
+  // The caster's power carries this now (see mul); the dice only add variance.
+  dice: 1,
   faces: 4,
   bonus: 0,
+  mul: 1.15,
 };
 
 /** Missiles the caster gets, each aimed on its own: one to start, a second at level 3, a
@@ -1473,9 +1482,10 @@ export const WEB_OF_DREAMS = {
 export const LIGHTNING = {
   name: "Relâmpago",
   range: 4,
-  dice: 4,
-  faces: 12,
-  bonus: 6,
+  dice: 2,
+  faces: 8,
+  bonus: 0,
+  mul: 2.0,
   echoDice: 1,
   echoFaces: 12,
   echoBonus: 2,
@@ -1491,23 +1501,32 @@ export const CURE_DISEASE = {
   range: 1,
 };
 
-export function lightningDice(level: number): number {
-  return LIGHTNING.dice + (level >= 8 ? 2 : 0);
+/** Flat, for the same reason as fireballPower: the caster's MAG carries the growth now. */
+export function lightningDice(): number {
+  return LIGHTNING.dice;
 }
 
-export function lightningFormula(level: number): string {
-  return diceFormula(lightningDice(level), LIGHTNING.faces, LIGHTNING.bonus);
+/** How a spell's damage reads to the player: the caster's power weighted by the spell,
+ * plus its dice. Written the way it is computed (see spellDamage in engine.ts), so the tip
+ * and the number that lands agree. */
+export function spellFormula(mag: number, mul: number, dice: number, faces: number, bonus: number): string {
+  return `${Math.floor(Math.floor(mag / 2) * mul)} + ${diceFormula(dice, faces, bonus)}`;
 }
 
-export function fireballPower(level: number): { dice: number; faces: number; bonus: number } {
-  if (level >= 9) return { dice: 6, faces: 6, bonus: 10 };
-  if (level >= 5) return { dice: 4, faces: 6, bonus: 6 };
+export function lightningFormula(mag: number): string {
+  return spellFormula(mag, LIGHTNING.mul, lightningDice(), LIGHTNING.faces, LIGHTNING.bonus);
+}
+
+/** Fireball's dice no longer climb with level. They used to (6d6+10 by level 9) because the
+ * spell had no other way to grow — it ignored the caster entirely. The multiplier on the
+ * caster's own MAG does that now, and keeping both would have scaled it twice. */
+export function fireballPower(): { dice: number; faces: number; bonus: number } {
   return { dice: FIREBALL.dice, faces: FIREBALL.faces, bonus: FIREBALL.bonus };
 }
 
-export function fireballFormula(level: number): string {
-  const p = fireballPower(level);
-  return diceFormula(p.dice, p.faces, p.bonus);
+export function fireballFormula(mag: number): string {
+  const p = fireballPower();
+  return spellFormula(mag, FIREBALL.mul, p.dice, p.faces, p.bonus);
 }
 
 /** Spell-slot tiers (D&D-style): how fast each class unlocks and refills tier N depends on its casting speed. */

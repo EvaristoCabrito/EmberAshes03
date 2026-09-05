@@ -1,6 +1,6 @@
-import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, CURE_DISEASE, CURES, DECORATIONS, DISEASE, DOUBLE_STRIKE, EMPTY_BAG, EQUIPMENT, EXP_TO_LEVEL, expForHit, FIREBALL, FOOTPRINT_TYPE_7, FOOTPRINT_TYPE_8, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, MAGIC_MISSILE, magicMissileCount, MAX_LEVEL, PIERCING, PIERCING_THRUST, POTION_CARRY_MAX, POTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, WEAPON_MAX_ENH, WEAPONS, WEB_OF_DREAMS, cureSpan, decorationCells, diceFormula, effectiveMaxRange, enemyLevelFor, fireballFormula, fireballOrigin, fireballPower, fireballRangeTiles, fireballTiles, hexAreaTiles, isProjectile, lightningDice, lightningFormula, missionGearLevel, parseLayout, potionLabel, rollCure, rollDice, rollPotion, spellTier, starterWeaponFor, STARTING_BAG, statsFor, terrainNote, TERRAIN, tierKey, tierUses, gearStatBonus, offHandBlocked, weightedLootPick, weightedPotionPick, weightedWeaponPick } from "./data";
+import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, CURE_DISEASE, CURES, DECORATIONS, DISEASE, DOUBLE_STRIKE, EMPTY_BAG, EQUIPMENT, EXP_TO_LEVEL, expForHit, FIREBALL, FOOTPRINT_TYPE_7, FOOTPRINT_TYPE_8, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, MAGIC_MISSILE, magicMissileCount, MAX_LEVEL, PIERCING, PIERCING_THRUST, POTION_CARRY_MAX, POTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, WEAPON_MAX_ENH, WEAPONS, WEB_OF_DREAMS, cureSpan, decorationCells, diceFormula, effectiveMaxRange, enemyLevelFor, fireballFormula, fireballOrigin, fireballPower, fireballRangeTiles, fireballTiles, hexAreaTiles, isProjectile, lightningDice, lightningFormula, missionGearLevel, parseLayout, potionLabel, rollCure, rollDice, rollPotion, spellFormula, spellTier, starterWeaponFor, STARTING_BAG, statsFor, terrainNote, TERRAIN, tierKey, tierUses, gearStatBonus, offHandBlocked, weaponRoll, weightedLootPick, weightedPotionPick, weightedWeaponPick } from "./data";
 import type { SpellTier } from "./data";
-import { canCounter, makeForecast, mulberry32, rollDamage, rollDamageCustom } from "./combat";
+import { canCounter, makeForecast, mulberry32, powerOf, protOf, rollDamage, rollDamageCustom } from "./combat";
 import {
   attackableEnemies,
   canHitFrom,
@@ -114,7 +114,7 @@ type Seq =
        * next turn. */
       stunChance?: number;
     }
-  | { type: "spell"; att: string; tiles: Point[]; ids: string[]; dice?: number; faces?: number; bonus?: number; moreDice?: number; moreFaces?: number; label?: string; echo?: { dice: number; faces: number; bonus: number }; dmgMul?: number; weaponBonusDice?: number; weaponBonusFaces?: number; weaponBonusBonus?: number; spellKind?: SpellKind; centerId?: string; centerDice?: number; centerFaces?: number; centerBonus?: number; poison?: boolean }
+  | { type: "spell"; att: string; tiles: Point[]; ids: string[]; dice?: number; faces?: number; bonus?: number; moreDice?: number; moreFaces?: number; label?: string; echo?: { dice: number; faces: number; bonus: number }; dmgMul?: number; weaponBonusDice?: number; weaponBonusFaces?: number; weaponBonusBonus?: number; spellKind?: SpellKind; centerId?: string; centerDice?: number; centerFaces?: number; centerBonus?: number; poison?: boolean; spellMul?: number; centerMul?: number }
   | { type: "heal"; att: string; def: string; kind: HealId }
   | { type: "cureDisease"; att: string; def: string }
   | { type: "banner"; text: string; dur: number }
@@ -172,6 +172,11 @@ interface SpellAnim {
   /** Whether landing a hit also poisons the target (see startOfTurnEffects) — both sides,
    * Caustic Venom's splash spares no one. */
   poison: boolean;
+  /** How hard the caster's own power lands for this spell. Above 1 for every spell, which
+   * is what keeps a cast ahead of the plain hit the same unit could have made instead. */
+  spellMul: number;
+  /** The same, for Caustic Venom's centre hex, which is stronger than its splash. */
+  centerMul: number;
 }
 
 interface HealAnim {
@@ -793,6 +798,8 @@ export class BattleEngine {
         centerFaces: step.centerFaces ?? 8,
         centerBonus: step.centerBonus ?? 0,
         poison: step.poison ?? false,
+        spellMul: step.spellMul ?? 1,
+        centerMul: step.centerMul ?? step.spellMul ?? 1,
       };
       this.banner = step.label ?? "";
       sfxPlay.crit();
@@ -994,6 +1001,27 @@ export class BattleEngine {
     }
   }
 
+  /** Damage for one spell hit on one target.
+   *
+   * A spell is a boosted version of the hit the caster could have made instead: same power,
+   * same protection, with the caster's own stat weighted by the spell's multiplier and the
+   * spell's dice standing in for the weapon. Every multiplier is above 1 and the result is
+   * floored at a plain attack, so a cast can never come out worse than simply swinging —
+   * which it could before, because spells ignored the caster's stat entirely and a mage's
+   * MAG only ever improved their basic attack.
+   *
+   * The multiplier weights the power term alone. Applied to the whole total it would scale
+   * the defender's RES with it, making armoured targets hardest for the spells meant to
+   * break them. */
+  private spellDamage(att: Unit, foe: Unit, mul: number, roll: number): number {
+    const attTile = TERRAIN[tileAt(this.tiles, this.cols, att.x, att.y)];
+    const defTile = TERRAIN[tileAt(this.tiles, this.cols, foe.x, foe.y)];
+    const prot = protOf(att, foe);
+    const spell = Math.floor(powerOf(att) * mul) + roll + attTile.atk - prot - (defTile.cover ?? 0);
+    const plain = powerOf(att) + weaponRoll(att.weaponId, att.weaponEnh, this.rng) + attTile.atk - prot - defTile.def;
+    return Math.max(1, Math.round(Math.max(spell, plain)));
+  }
+
   private stepSpell(a: SpellAnim, dt: number): void {
     const att = this.units.find((u) => u.id === a.att);
     if (!att) {
@@ -1034,16 +1062,11 @@ export class BattleEngine {
         let dmg: number;
         let crit = false;
         if (a.centerId && foe.id === a.centerId) {
-          const attTile = TERRAIN[tileAt(this.tiles, this.cols, att.x, att.y)];
-          const defTile = TERRAIN[tileAt(this.tiles, this.cols, foe.x, foe.y)];
-          dmg = rollDice(a.centerDice, a.centerFaces, a.centerBonus, this.rng);
-          dmg = Math.max(1, dmg - foe.res + attTile.atk - (defTile.cover ?? 0));
+          dmg = this.spellDamage(att, foe, a.centerMul, rollDice(a.centerDice, a.centerFaces, a.centerBonus, this.rng));
         } else if (a.extraDice > 0) {
-          const attTile = TERRAIN[tileAt(this.tiles, this.cols, att.x, att.y)];
-          const defTile = TERRAIN[tileAt(this.tiles, this.cols, foe.x, foe.y)];
-          dmg = rollDice(a.extraDice, a.extraFaces, a.extraBonus, this.rng);
-          if (a.moreDice > 0) dmg += rollDice(a.moreDice, a.moreFaces, 0, this.rng);
-          dmg = Math.max(1, dmg - foe.res + attTile.atk - (defTile.cover ?? 0));
+          let roll = rollDice(a.extraDice, a.extraFaces, a.extraBonus, this.rng);
+          if (a.moreDice > 0) roll += rollDice(a.moreDice, a.moreFaces, 0, this.rng);
+          dmg = this.spellDamage(att, foe, a.spellMul, roll);
         } else if (a.spellKind === "piercingThrust") {
           // Armor-piercing: the defender's DEF is treated as 20% lower for this hit only.
           const softened = { ...foe, def: Math.max(0, Math.floor(foe.def * (1 - PIERCING_THRUST.armorIgnore))) };
@@ -1705,7 +1728,7 @@ export class BattleEngine {
     this.spellArmed = false;
     this.spellAim = null;
     this.hover = null;
-    this.tip = `${FIREBALL.name}: alcance ${FIREBALL.range}, ${fireballFormula(u.level)} − RES em área. Toque para mirar, toque de novo para lançar.`;
+    this.tip = `${FIREBALL.name}: alcance ${FIREBALL.range}, ${fireballFormula(u.mag)} − RES em área. Toque para mirar, toque de novo para lançar.`;
     sfxPlay.ui();
   }
 
@@ -1753,7 +1776,7 @@ export class BattleEngine {
     this.spellArmed = false;
     this.spellAim = null;
     this.hover = null;
-    this.tip = `Relâmpago: alcance ${LIGHTNING.range}, ${lightningFormula(u.level)} − RES. No turno seguinte ${diceFormula(LIGHTNING.echoDice, LIGHTNING.echoFaces, LIGHTNING.echoBonus)} − RES. Toque no inimigo.`;
+    this.tip = `Relâmpago: alcance ${LIGHTNING.range}, ${lightningFormula(u.mag)} − RES. No turno seguinte ${diceFormula(LIGHTNING.echoDice, LIGHTNING.echoFaces, LIGHTNING.echoBonus)} − RES. Toque no inimigo.`;
     sfxPlay.ui();
   }
 
@@ -1766,7 +1789,7 @@ export class BattleEngine {
     this.spellAim = null;
     this.hover = null;
     const shots = magicMissileCount(u.level);
-    this.tip = `${MAGIC_MISSILE.name}: alcance ${MAGIC_MISSILE.range}, ${diceFormula(MAGIC_MISSILE.dice, MAGIC_MISSILE.faces, u.mag)} − RES por míssil. ${shots} míssil${shots > 1 ? "eis, um alvo cada (pode repetir)" : ""}. Acerto garantido. Toque no inimigo.`;
+    this.tip = `${MAGIC_MISSILE.name}: alcance ${MAGIC_MISSILE.range}, ${spellFormula(u.mag, MAGIC_MISSILE.mul, MAGIC_MISSILE.dice, MAGIC_MISSILE.faces, MAGIC_MISSILE.bonus)} − RES por míssil. ${shots} míssil${shots > 1 ? "eis, um alvo cada (pode repetir)" : ""}. Acerto garantido. Toque no inimigo.`;
     sfxPlay.ui();
   }
 
@@ -2276,11 +2299,12 @@ export class BattleEngine {
       att: unit.id,
       tiles: [cell],
       ids: [foe.id],
-      dice: lightningDice(unit.level),
+      dice: lightningDice(),
       faces: LIGHTNING.faces,
       bonus: LIGHTNING.bonus,
       label: LIGHTNING.name,
       echo: { dice: LIGHTNING.echoDice, faces: LIGHTNING.echoFaces, bonus: LIGHTNING.echoBonus },
+      spellMul: LIGHTNING.mul,
       spellKind: "lightning",
     });
   }
@@ -2323,9 +2347,10 @@ export class BattleEngine {
         ids: [shot.id],
         dice: MAGIC_MISSILE.dice,
         faces: MAGIC_MISSILE.faces,
-        bonus: MAGIC_MISSILE.bonus + unit.mag,
+        bonus: MAGIC_MISSILE.bonus,
         label: MAGIC_MISSILE.name,
-        spellKind: "magicMissile",
+        spellMul: MAGIC_MISSILE.mul,
+      spellKind: "magicMissile",
       });
     }
   }
@@ -3174,7 +3199,7 @@ export class BattleEngine {
     this.missileTargets = [];
     this.tip = null;
     this.mode = "locked";
-    const power = fireballPower(unit.level);
+    const power = fireballPower();
     this.queue.push({
       type: "spell",
       att: unit.id,
@@ -3184,13 +3209,16 @@ export class BattleEngine {
       faces: power.faces,
       bonus: power.bonus,
       label: FIREBALL.name,
+      spellMul: FIREBALL.mul,
       spellKind: "fireball",
     });
   }
 
   private castCausticVenom(unit: Unit, click: Point): void {
     const origin = fireballOrigin(click, this.cols, this.rows);
-    const tiles = fireballTiles(origin, this.cols, this.rows);
+    // Its own radius rather than Fireball's: fireballTiles hardcodes FIREBALL.size, which
+    // is why venom could not be widened without widening Fireball with it.
+    const tiles = hexAreaTiles(origin, CAUSTIC_VENOM.size, this.cols, this.rows);
     const ids: string[] = [];
     for (const t of tiles) {
       const u = this.units.find((x) => x.alive && occupies(x, t.x, t.y));
@@ -3216,6 +3244,8 @@ export class BattleEngine {
       centerBonus: CAUSTIC_VENOM.centerBonus,
       poison: true,
       label: CAUSTIC_VENOM.name,
+      spellMul: CAUSTIC_VENOM.splashMul,
+      centerMul: CAUSTIC_VENOM.centerMul,
       spellKind: "causticVenom",
     });
   }
@@ -3644,7 +3674,7 @@ export class BattleEngine {
         overlay(fireballRangeTiles(selected, this.cols, this.rows), "rgba(200,210,90,0.45)");
         const cell = this.hover ?? this.spellAim;
         if (cell && manhattan(selected, cell) <= CAUSTIC_VENOM.range) {
-          overlay(fireballTiles(fireballOrigin(cell, this.cols, this.rows), this.cols, this.rows), "rgba(200,210,90,0.55)");
+          overlay(hexAreaTiles(fireballOrigin(cell, this.cols, this.rows), CAUSTIC_VENOM.size, this.cols, this.rows), "rgba(200,210,90,0.55)");
         }
       } else if (selected && this.spellKind === "longShot") {
         const reach: Point[] = [];

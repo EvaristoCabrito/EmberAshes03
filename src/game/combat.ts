@@ -2,12 +2,20 @@ import { isProjectile, rollDice, TERRAIN, WEAPONS, weaponPreview, weaponRoll } f
 import { canHitFrom } from "./pathfinding";
 import type { Forecast, TerrainId, Unit } from "./types";
 
+/** What a unit's own stat contributes to a hit: half of ATK, or half of MAG for a caster.
+ *
+ * Halved because the stat used to be the whole story — a point of ATK was a point of
+ * damage, so levels drowned out what a unit was carrying. At half weight the weapon and
+ * spell dice decide as much as the stat does. Rounded down; there are no half points. */
 export function powerOf(unit: Unit): number {
-  return unit.mag > 0 ? unit.mag : unit.atk;
+  return Math.floor((unit.mag > 0 ? unit.mag : unit.atk) / 2);
 }
 
+/** What the defender's stat takes off, halved to match powerOf — DEF against a weapon, RES
+ * against a caster. Halving only the attacking side would have cut damage to a third
+ * rather than half, since this is subtracted after. */
 export function protOf(attacker: Unit, defender: Unit): number {
-  return attacker.mag > 0 ? defender.res : defender.def;
+  return Math.floor((attacker.mag > 0 ? defender.res : defender.def) / 2);
 }
 
 function terrainBonus(attacker: Unit, defender: Unit, attTile: TerrainId, defTile: TerrainId): { atk: number; def: number } {
