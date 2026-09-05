@@ -20,12 +20,18 @@ export const MAP_SAVE_ROUTE = "/__map-save";
 /** Sets how many missions a location is meant to hold — see src/game/map-slots.json. */
 export const SLOTS_SAVE_ROUTE = "/__map-slots";
 
+/** Sets the play order of the missions at each location — see src/game/map-order.json. */
+export const ORDER_SAVE_ROUTE = "/__map-order";
+
 /** Where saved maps live, relative to the project root. */
 export const MAPS_DIR = join("src", "game", "maps");
 
 /** The per-location slot counts, relative to the project root. Config, not a version:
  * a new count replaces the old one rather than appending a serial. */
 export const SLOTS_FILE = join("src", "game", "map-slots.json");
+
+/** Per-location mission order, same config-not-a-version treatment as the slot counts. */
+export const ORDER_FILE = join("src", "game", "map-order.json");
 
 /** A scenario id is a file name, so it may only hold characters that are safe in one —
  * this is what stops a crafted id from writing outside the maps folder. */
@@ -76,11 +82,13 @@ export function mapSavePlugin() {
     configureServer(server) {
       const dir = join(server.config.root, MAPS_DIR);
       const slotsPath = join(server.config.root, SLOTS_FILE);
+      const orderPath = join(server.config.root, ORDER_FILE);
       server.middlewares.use((req, res, next) => {
         const pathOnly = (req.url ?? "").split("?", 1)[0];
         const isMap = pathOnly === MAP_SAVE_ROUTE;
         const isSlots = pathOnly === SLOTS_SAVE_ROUTE;
-        if ((!isMap && !isSlots) || (req.method ?? "GET").toUpperCase() !== "POST") {
+        const isOrder = pathOnly === ORDER_SAVE_ROUTE;
+        if ((!isMap && !isSlots && !isOrder) || (req.method ?? "GET").toUpperCase() !== "POST") {
           next();
           return;
         }
@@ -94,6 +102,18 @@ export function mapSavePlugin() {
         };
         readBody(req, 8 * 1024 * 1024)
           .then((raw) => {
+            if (isOrder) {
+              const wanted = JSON.parse(raw);
+              const cleaned = {};
+              for (const [locationId, ids] of Object.entries(wanted ?? {})) {
+                if (!isSafeMapId(locationId) || !Array.isArray(ids)) continue;
+                const list = ids.filter((id) => isSafeMapId(id));
+                if (list.length > 0) cleaned[locationId] = list;
+              }
+              writeFileSync(orderPath, JSON.stringify(cleaned, null, 2) + "\n", "utf8");
+              reply(200, { ok: true, file: ORDER_FILE, order: cleaned });
+              return;
+            }
             if (isSlots) {
               const wanted = JSON.parse(raw);
               const cleaned = {};

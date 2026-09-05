@@ -16,6 +16,7 @@
  */
 import { MISSIONS, TILE_CHAR, WORLD_LOCATIONS } from "./data";
 import SLOT_CONFIG from "./map-slots.json";
+import ORDER_CONFIG from "./map-order.json";
 import type { DecorationPlacement, Mission, Spawn, TerrainId, WinCondition, WorldLocation } from "./types";
 
 /** A spawn as edited in the Map Editor — the real Spawn shape plus a per-spawn test
@@ -149,20 +150,59 @@ export function missionById(id: string): Mission | undefined {
 /** The world map, with saved maps hung off the locations they name. A map whose
  * scenario already belongs to a location stays there; locationId is what places a map
  * that had nowhere to appear before. */
-export const ALL_LOCATIONS: WorldLocation[] = (() => {
-  const extra = new Map<string, string[]>();
-  for (const file of LATEST.values()) {
-    const loc = file.draft.locationId;
-    if (!loc) continue;
-    const already = WORLD_LOCATIONS.some((l) => l.id !== loc && l.missionIds.includes(file.draft.id));
-    if (already) continue;
-    extra.set(loc, [...(extra.get(loc) ?? []), file.draft.id]);
+/** What the Map Editor has assigned to each location, in play order — see
+ * src/game/map-order.json.
+ *
+ * This carries membership as well as order. A mission named under a location belongs to
+ * that location whatever the shipped data or its own map file says, which is what lets a
+ * campaign mission be moved: those have no map file of their own to hold a locationId.
+ * Anything not named anywhere keeps its shipped home, and follows the named ones. */
+const ORDER: Record<string, string[]> = ORDER_CONFIG;
+
+/** Location a mission has been reassigned to, or undefined if it was never moved. */
+function assignedLocation(missionId: string): string | undefined {
+  for (const [locationId, ids] of Object.entries(ORDER)) {
+    if (ids.includes(missionId)) return locationId;
   }
-  return WORLD_LOCATIONS.map((l) => {
-    const add = (extra.get(l.id) ?? []).filter((id) => !l.missionIds.includes(id));
-    return add.length > 0 ? { ...l, missionIds: [...l.missionIds, ...add] } : l;
-  });
+  return undefined;
+}
+
+function inChosenOrder(locationId: string, missionIds: string[]): string[] {
+  const wanted = ORDER[locationId] ?? [];
+  const first = wanted.filter((id) => missionIds.includes(id));
+  return [...first, ...missionIds.filter((id) => !first.includes(id))];
+}
+
+/** The world map, with saved maps placed where they say they belong.
+ *
+ * A saved map's locationId is authoritative: the mission leaves whichever location used to
+ * list it and joins the one it names. That is what makes moving a mission between
+ * locations in the editor actually take effect — before, a mission already listed
+ * somewhere kept its original home and the choice was silently dropped. */
+export const ALL_LOCATIONS: WorldLocation[] = (() => {
+  const moved = new Map<string, string>();
+  for (const file of LATEST.values()) {
+    if (file.draft.locationId) moved.set(file.draft.id, file.draft.locationId);
+  }
+  // map-order.json wins over a map file's own locationId: it is what the editor's Locais
+  // panel writes, and it is the only way to move a mission that has no map file.
+  for (const [locationId, ids] of Object.entries(ORDER)) {
+    for (const id of ids) moved.set(id, locationId);
+  }
+  const out = WORLD_LOCATIONS.map((l) => ({
+    ...l,
+    missionIds: l.missionIds.filter((id) => (moved.has(id) ? moved.get(id) === l.id : true)),
+  }));
+  for (const [missionId, locationId] of moved) {
+    const target = out.find((l) => l.id === locationId);
+    if (target && !target.missionIds.includes(missionId)) target.missionIds.push(missionId);
+  }
+  return out.map((l) => ({ ...l, missionIds: inChosenOrder(l.id, l.missionIds) }));
 })();
+
+/** Where a mission has been reassigned to, if anywhere — the editor shows this so a moved
+ * mission reads as moved rather than as missing from its shipped home. */
+export { assignedLocation };
 
 export function locationForMission(missionId: string): WorldLocation | undefined {
   return ALL_LOCATIONS.find((l) => l.missionIds.includes(missionId));

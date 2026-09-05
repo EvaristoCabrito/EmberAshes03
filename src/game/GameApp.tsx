@@ -1702,6 +1702,54 @@ function MapEditorScreen({
   const [exportText, setExportText] = useState<string | null>(null);
   const [copyOk, setCopyOk] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const [showLocations, setShowLocations] = useState(false);
+  // Play order per location, keyed by location id. Seeded from what ALL_LOCATIONS resolved
+  // to, so a location with no stored order still lists its missions in the order they play.
+  const [order, setOrder] = useState<Record<string, string[]>>(() =>
+    Object.fromEntries(ALL_LOCATIONS.map((l) => [l.id, [...l.missionIds]])),
+  );
+
+  /** Writes src/game/map-order.json through the dev server. Config, not a version — a new
+   * order replaces the old one rather than adding a serial. */
+  const saveOrder = async (next: Record<string, string[]>) => {
+    setOrder(next);
+    try {
+      const res = await fetch("/__map-order", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(next),
+      });
+      const body = (await res.json()) as { ok?: boolean; error?: string };
+      if (!res.ok || !body.ok) {
+        setNote(`Não deu pra gravar a ordem: ${body.error ?? `HTTP ${res.status}`}`);
+        return;
+      }
+      setNote("Ordem das missões atualizada em src/game/map-order.json.");
+    } catch (err) {
+      setNote(`Sem servidor de dev — ordem não gravada (${err instanceof Error ? err.message : String(err)}).`);
+    }
+  };
+
+  /** Sends a mission to another location. It leaves every other list and joins the end of
+   * the destination's, which is then reordered with the arrows. */
+  const transferMission = (missionId: string, toLocationId: string) => {
+    const next: Record<string, string[]> = {};
+    for (const [locId, ids] of Object.entries(order)) {
+      const kept = ids.filter((id) => id !== missionId);
+      if (kept.length > 0) next[locId] = kept;
+    }
+    next[toLocationId] = [...(next[toLocationId] ?? []), missionId];
+    void saveOrder(next);
+  };
+
+  const moveInOrder = (locationId: string, missionId: string, dir: -1 | 1) => {
+    const list = [...(order[locationId] ?? [])];
+    const i = list.indexOf(missionId);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= list.length) return;
+    [list[i], list[j]] = [list[j]!, list[i]!];
+    void saveOrder({ ...order, [locationId]: list });
+  };
 
   const versions = versionStore[draft.id] ?? [];
   const repoFiles = savedVersionsFor(draft.id);
@@ -1936,6 +1984,9 @@ function MapEditorScreen({
         <div className="flex flex-wrap items-center gap-2 text-sm">
           <Button variant="ghost" size="sm" onClick={() => setDraft(blankDraft())}>
             Novo
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => setShowLocations(true)}>
+            Locais
           </Button>
           <select
             className="bg-bg border border-border rounded-md px-2 py-1.5"
@@ -2465,6 +2516,86 @@ function MapEditorScreen({
           )}
         </div>
       </div>
+
+      {showLocations && (
+        <div
+          className="absolute inset-0 z-50 bg-bg/85 flex items-center justify-center p-4"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowLocations(false);
+          }}
+        >
+          <div className="w-full max-w-lg max-h-[85dvh] overflow-y-auto bg-surface border border-border rounded-xl p-5">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div>
+                <p className="font-display text-xl leading-tight">Locais</p>
+                <p className="text-xs text-muted">Ordem em que as missões aparecem, e para onde cada uma vai.</p>
+              </div>
+              <button type="button" onClick={() => setShowLocations(false)} className="size-8 grid place-items-center rounded-md border border-border" aria-label="Fechar">
+                <X className="size-4" />
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              {ALL_LOCATIONS.map((loc) => {
+                const ids = order[loc.id] ?? loc.missionIds;
+                const planned = slotsFor(loc.id);
+                return (
+                  <div key={loc.id} className="border border-border rounded-md p-2.5">
+                    <p className="text-xs uppercase tracking-wide text-muted mb-1.5">
+                      {loc.name}
+                      {planned > 0 ? ` · ${ids.length}/${planned}` : ids.length > 0 ? ` · ${ids.length}` : " · vazio"}
+                    </p>
+                    {ids.length === 0 ? (
+                      <p className="text-xs text-muted">Nenhuma missão aqui ainda.</p>
+                    ) : (
+                      <div className="flex flex-col gap-1">
+                        {ids.map((id, i) => {
+                          const m = missionById(id);
+                          return (
+                            <div key={id} className="flex items-center gap-1.5 text-xs bg-bg border border-border rounded-md px-2 py-1.5">
+                              <span className="tabular-nums text-muted w-5 shrink-0">{i + 1}.</span>
+                              <span className="flex-1 min-w-0 truncate">{m ? m.title : id}</span>
+                              <button type="button" disabled={i === 0} onClick={() => moveInOrder(loc.id, id, -1)} className="px-1.5 rounded border border-border disabled:opacity-30" aria-label="Subir">
+                                ↑
+                              </button>
+                              <button type="button" disabled={i === ids.length - 1} onClick={() => moveInOrder(loc.id, id, 1)} className="px-1.5 rounded border border-border disabled:opacity-30" aria-label="Descer">
+                                ↓
+                              </button>
+                              <select
+                                className="bg-bg border border-border rounded px-1 py-0.5 max-w-[8.5rem]"
+                                value=""
+                                title="Mover esta missão para outro local"
+                                onChange={(e) => {
+                                  const to = e.target.value;
+                                  e.target.value = "";
+                                  if (!to) return;
+                                  const dest = ALL_LOCATIONS.find((l) => l.id === to);
+                                  // Moving a mission changes where the campaign sends the
+                                  // player, so it asks before it happens.
+                                  if (!window.confirm(`Mover "${m ? m.title : id}" de ${loc.name} para ${dest?.name ?? to}?`)) return;
+                                  transferMission(id, to);
+                                }}
+                              >
+                                <option value="">Mover para…</option>
+                                {ALL_LOCATIONS.filter((l) => l.id !== loc.id).map((l) => (
+                                  <option key={l.id} value={l.id}>
+                                    {l.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
     </section>
   );
 }
