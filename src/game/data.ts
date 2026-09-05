@@ -2506,10 +2506,15 @@ export function scatterTactics(m: Mission): Mission {
       walls.push({ cells, score: (between ? 12 : 0) + sameRow + central * 4 - dFront });
     }
   }
+  // The amounts below were tuned for a campaign map, which expandMaps has already doubled
+  // to roughly 224-352 cells. Run unscaled on a smaller board they crowd it — a raw 10x8
+  // got the same two walls in a quarter of the space — so they follow the area instead.
+  const density = (m.cols * m.rows) / 288;
+  const wantWalls = Math.max(1, Math.round(2 * density));
   walls.sort((a, b) => b.score - a.score);
   let placed = 0;
   for (const wall of walls) {
-    if (placed >= 2) break;
+    if (placed >= wantWalls) break;
     if (wall.cells.some((c) => taken.some((q) => oddrDist(c.x, c.y, q.x, q.y) < 3))) continue;
     const prev = wall.cells.map((c) => tiles[c.y * m.cols + c.x]!);
     for (const c of wall.cells) tiles[c.y * m.cols + c.x] = "barricade";
@@ -2534,7 +2539,7 @@ export function scatterTactics(m: Mission): Mission {
       got += 1;
     }
   };
-  pick(3, "hill");
+  pick(Math.max(1, Math.round(3 * density)), "hill");
   const highKinds: TerrainId[] = ["hill", "highwood", "highruin", "deadtree"];
   for (let y = 0; y < m.rows; y++) {
     for (let x = 0; x < m.cols; x++) {
@@ -2797,6 +2802,14 @@ function applyDeadGround(mission: Mission): Mission {
     if (tiles[i] === "plains") variants[i] = DEAD_GROUND_VARIANT;
   }
   return { ...mission, tileVariants: variants };
+}
+
+/** Everything the campaign lays over a map on load, in the order it runs: the tactical
+ * scatter, then columns rocked into props, then the open-ground pass that adds chests and
+ * decoration. The Map Editor's "Gerar terreno" calls this so the board it fills matches
+ * what a real mission would look like, rather than only the first of the three. */
+export function dressMap(m: Mission): Mission {
+  return decorateOpenTerrain(rockifyColumns(scatterTactics(m)));
 }
 
 export const MISSIONS: Mission[] = expandMaps(RAW_MISSIONS).map(rockifyColumns).map(decorateOpenTerrain).map(applyDeadGround);

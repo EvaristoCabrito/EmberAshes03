@@ -6,7 +6,7 @@ import { installAudioUnlock, playMenuMusic, playTheme, resumeAudio, setMuted, sf
 import { BattleCanvas } from "./BattleCanvas";
 import { InnScreen } from "./InnScreen";
 import { BackpackScreen, PaperDollScreen } from "./InventoryScreens";
-import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, CURE_DISEASE, CURES, DECORATIONS, DOUBLE_STRIKE, EQUIPMENT, EXP_TO_LEVEL, FIREBALL, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, MAGIC_MISSILE, PIERCING, PIERCING_THRUST, MAX_LEVEL, POTIONS, POTION_LOOT_WEIGHT, PROMOTE_LEVEL, PROMOTED_BASE, PROMOTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, TERRAIN, WEAPONS, WEAPON_MAX_ENH, WEB_OF_DREAMS, BAG_MAX, LOCKPICK_PRICE, POTION_CARRY_MAX, POTION_PRICE, decorationCells, decorationImage, diceFormula, emberForKill, enemyLevelFor, equippedPouchId, fireballFormula, lightningFormula, parseLayout, scatterTactics, potionLabel, pouchIcon, rangeLabel, sheetLine, spellTier, startingBags, statsFor, terrainNote, tierKey, tierUses, weaponEnhCost, weaponSellValue, type SpellTier } from "./data";
+import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, CURE_DISEASE, CURES, DECORATIONS, DOUBLE_STRIKE, EQUIPMENT, EXP_TO_LEVEL, FIREBALL, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, MAGIC_MISSILE, PIERCING, PIERCING_THRUST, MAX_LEVEL, POTIONS, POTION_LOOT_WEIGHT, PROMOTE_LEVEL, PROMOTED_BASE, PROMOTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, TERRAIN, WEAPONS, WEAPON_MAX_ENH, WEB_OF_DREAMS, BAG_MAX, LOCKPICK_PRICE, POTION_CARRY_MAX, POTION_PRICE, decorationCells, decorationImage, diceFormula, emberForKill, enemyLevelFor, equippedPouchId, fireballFormula, lightningFormula, dressMap, parseLayout, potionLabel, pouchIcon, rangeLabel, sheetLine, spellTier, startingBags, statsFor, terrainNote, tierKey, tierUses, weaponEnhCost, weaponSellValue, type SpellTier } from "./data";
 import { BattleEngine } from "./engine";
 import { WorldMapScreen } from "./WorldMapScreen";
 import { DISPLAY_VERSION } from "./version";
@@ -2037,16 +2037,24 @@ function MapEditorScreen({
             size="sm"
             title="Espalha barricadas, barrancos e terreno alto pelo mapa do tamanho atual — depois é só limpar o que não serve"
             onClick={() => {
-              // The same pass the campaign runs on load, aimed at the map in hand: fill the
-              // board with something to react to, then clear what does not belong.
-              const filled = scatterTactics(draftToMission({ ...draft, autoTactics: true }));
+              // Everything the campaign lays over a map on load — scatter, rocks, chests
+              // and decoration — aimed at the map in hand: fill the board with something to
+              // react to, then clear what does not belong.
+              const filled = dressMap(draftToMission({ ...draft, autoTactics: true }));
               const tiles = parseLayout(filled.layout);
+              const decorations = filled.decorations ?? [];
               setDraft((d) => ({
                 ...d,
                 tiles,
                 tileVariants: tiles.map((t, i) => Math.min(d.tileVariants[i] ?? 0, (TILE_VARIANT_COUNT[t] ?? 1) - 1)),
+                decorations,
               }));
-              setNote(`Terreno gerado em ${draft.cols}x${draft.rows} — apague o que não servir e salve.`);
+              const counts = new Map<TerrainId, number>();
+              for (const t of tiles) if (t !== "plains") counts.set(t, (counts.get(t) ?? 0) + 1);
+              const summary = [...counts.entries()].map(([t, n]) => `${n} ${TERRAIN[t].name.toLowerCase()}`).join(", ");
+              setNote(
+                `Gerado em ${draft.cols}x${draft.rows}: ${summary || "nada"}${decorations.length > 0 ? `, ${decorations.length} decoração(ões)` : ""} — apague o que não servir.`,
+              );
             }}
           >
             Gerar terreno
