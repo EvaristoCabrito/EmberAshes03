@@ -206,9 +206,6 @@ export interface Mission {
   /** Wild things that start on no side. Optional: a mission without any is every mission
    * shipped before neutrals existed, and reads as an empty list. */
   neutralSpawns?: Spawn[];
-  /** A specific track from public/game/MUSIC (by file name) to play through this mission,
-   * instead of the theme its id would otherwise fall into. Absent means the usual theme. */
-  music?: string;
   hub?: boolean;
   /** Whether stampTactics dresses this map — the pass that scatters barricades, hills and
    * the high-terrain variants over it after the layout is doubled. On unless a map says
@@ -219,12 +216,6 @@ export interface Mission {
    * Missing/undefined index or omitted array entirely means variant 0 (the default) —
    * existing missions never set this and keep rendering exactly as before. */
   tileVariants?: number[];
-  /** How far each tile's art is turned, in sixths of a circle (0-5), row-major like
-   * tileVariants. A hex maps onto itself every 60 degrees, so its art can be spun without
-   * the shape or its neighbours moving — which is what makes a coastline, a road or a wall
-   * meet the tile next to it instead of running the wrong way. Optional and absent by
-   * default: a mission without it draws every tile the way it was painted. */
-  tileRots?: number[];
   /** Multi-hex terrain props (mountains, ruins, bridges, ...) placed on this map.
    * Omitted/empty on every existing mission — purely additive. */
   decorations?: DecorationPlacement[];
@@ -352,11 +343,6 @@ export interface UnitPublic {
   def: number;
   res: number;
   mov: number;
-  /** Movement left this turn: MOV minus what has already been walked, clamped to 1 while
-   * restrained. Movement is a pool the action does not cancel — spend two hexes, cast, and
-   * the other three are still yours — so this is the number that actually matters in play,
-   * and the panel counts it down instead of showing the untouched base all turn. */
-  movLeft: number;
   minRange: number;
   maxRange: number;
   moved: boolean;
@@ -499,11 +485,6 @@ export interface HudSnapshot {
   busy: boolean;
   result: "victory" | "defeat" | null;
   winAvailable: boolean;
-  /** Whether the movement taken this turn can still be taken back — see canUndoMove. */
-  canUndoMove: boolean;
-  /** For a spell that picks more than one target (Magic Missile at level 3+), how many it
-   * wants and how many are already chosen. Null when nothing is waiting on a pick. */
-  targetPrompt: { name: string; need: number; picked: number } | null;
   zoom: number;
   speedMode: "normal" | "fast";
   tip: string | null;

@@ -41,8 +41,6 @@ export interface MapDraft {
   briefing: string;
   objective: string;
   win: WinCondition;
-  /** Track file name for this map, or absent for its usual theme. */
-  music?: string;
   hub: boolean;
   /** False to load this map exactly as painted, with no procedural scatter over it — see
    * Mission.autoTactics. Carried through Exportar so a map pasted into data.ts keeps it. */
@@ -58,9 +56,6 @@ export interface MapDraft {
   /** Art variant per tile (same indexing as tiles) — which numbered version (001, 002,
    * ...) paints there. Defaults to 0 (the "001" file, safe for existing missions). */
   tileVariants: number[];
-  /** How far each tile is turned, in sixths of a circle (same indexing as tiles). Optional:
-   * a map saved before hex rotation existed has no such key, read as "none turned". */
-  tileRots?: number[];
   decorations: DecorationPlacement[];
   playerSpawns: DraftSpawn[];
   enemySpawns: DraftSpawn[];
@@ -95,12 +90,10 @@ export function draftToMission(d: MapDraft): Mission {
     rows: d.rows,
     layout,
     tileVariants: d.tileVariants.some((v) => v) ? d.tileVariants : undefined,
-    tileRots: d.tileRots?.some((r) => r) ? d.tileRots : undefined,
     decorations: d.decorations.length > 0 ? d.decorations : undefined,
     playerSpawns: d.playerSpawns.map(({ level: _level, ...s }) => s),
     enemySpawns: d.enemySpawns.map(({ level: _level, ...s }) => s),
     neutralSpawns: d.neutralSpawns?.length ? d.neutralSpawns.map(({ level: _level, ...s }) => s) : undefined,
-    music: d.music || undefined,
     hub: d.hub || undefined,
     autoTactics: d.autoTactics ? undefined : false,
   };
