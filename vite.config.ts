@@ -12,6 +12,8 @@ import { grokPwaPlugin } from "./scripts/grok-pwa-plugin.mjs";
 import { appEnvPlugin } from "./scripts/app-env-plugin.mjs";
 // @ts-expect-error JS plugin alongside the TS vite config
 import { mapSavePlugin } from "./scripts/map-save-plugin.mjs";
+// @ts-expect-error JS plugin alongside the TS vite config
+import { musicPlugin } from "./scripts/music-plugin.mjs";
 import { isMigrationFile } from "./scripts/migration-plan.mjs";
 
 /** The one version number. `package.json` is the source of truth; the title
@@ -173,6 +175,9 @@ export default defineConfig(({ command, isPreview }) => ({
     appEnvPlugin(),
     // Dev-only /__map-save: the Map Editor writes maps into src/game/maps/.
     mapSavePlugin(),
+    // Sweeps stray audio into public/game/music and rewrites the track manifest, so a file
+    // dropped anywhere in the repo shows up in the editor's Trilha list.
+    musicPlugin(),
     // PWA head + ?install=1 tutorial page; runs before Start/Nitro.
     grokPwaPlugin(),
     tailwindcss(),

@@ -1,5 +1,6 @@
 import { TIER_KEYS } from "./types";
 import type { Bag, ClassDef, ClassId, DecorationDef, DecorationPlacement, EquipmentDef, EquipSlot, HealId, Mission, PotionId, SpellKind, TerrainDef, TerrainId, TierKey, Unit, WeaponDef, WorldLocation } from "./types";
+import musicManifest from "./music-manifest.json";
 
 export const TERRAIN: Record<TerrainId, TerrainDef> = {
   plains: { id: "plains", name: "Planície", moveCost: 1, def: 0, atk: 0, passable: true },
@@ -90,10 +91,34 @@ export const DECORATIONS: Record<string, DecorationDef> = {
   // it), blocks shots, and lets whoever stands right behind it shoot over while staying
   // unhittable through it.
   barricade: { id: "barricade", name: "Barricada", footprint: DECO_ONE, tile: "barricade" },
+  "barricade-2": { id: "barricade-2", name: "Barricada 2", footprint: DECO_ONE, tile: "barricade" },
+  "dead-tree": { id: "dead-tree", name: "Árvore morta", footprint: DECO_ONE },
+  "fallen-log": { id: "fallen-log", name: "Tronco caído", footprint: DECO_PAIR },
+  "small-house": { id: "small-house", name: "Casa pequena", footprint: DECO_ONE },
+  "stone-hut": { id: "stone-hut", name: "Cabana de pedra", footprint: DECO_ONE },
 };
 
+/** Every track in public/game/MUSIC, by file name, A-Z.
+ *
+ * Generated, not hand-kept: scripts/music-plugin.mjs sweeps the whole repo for audio at dev
+ * start, moves anything stray into that folder, and rewrites music-manifest.json. Drop an
+ * mp3 anywhere and it turns up in the editor's Trilha list without a line of code changing.
+ * SoundFX/ inside that folder is left alone — effects are not tracks. */
+export const MUSIC_TRACKS: string[] = musicManifest;
+
 export function decorationImage(id: string): string {
-  return `/game/decorations/${id}.png${id === "locked-chest" ? "?v=4" : ""}`;
+  return `/game/decorations/${id}.png${
+    id === "locked-chest"
+      ? "?v=4"
+      : id === "dead-tree" ||
+          id === "fallen-log" ||
+          id === "barricade" ||
+          id === "barricade-2" ||
+          id === "small-house" ||
+          id === "stone-hut"
+        ? "?v=4"
+        : ""
+  }`;
 }
 
 /** Every hex a placed decoration's footprint covers — impassable and blocks line of
@@ -115,7 +140,7 @@ export function barricadeDecor(
   for (let y = 0; y < rows; y++) {
     for (let x = 0; x < cols; x++) {
       if (tiles[y * cols + x] !== "barricade") continue;
-      if (existing.some((d) => d.id === "barricade" && d.x === x && d.y === y)) continue;
+      if (existing.some((d) => (d.id === "barricade" || d.id === "barricade-2") && d.x === x && d.y === y)) continue;
       out.push({ id: "barricade", x, y });
     }
   }
@@ -2310,6 +2335,7 @@ const RAW_MISSIONS: Mission[] = [
     id: "profundezas",
     index: 10,
     title: "As Profundezas Famintas",
+    music: "MindReading UMNX  077-Balanced-High.mp3",
     place: "Câmaras mais fundas da caverna",
     briefing:
       "A passagem continua abaixo, mais funda que qualquer mapa registrado. O ar cheira a cinza fria. Pilares talhados sustentam um teto que não deveria existir a essa profundidade. Algo aqui não come há muito tempo — e não é comida que procura.",
@@ -2906,13 +2932,10 @@ function decorateOpenTerrain(mission: Mission): Mission {
   };
 }
 
-/** Missions whose open ground is meant to read as dead/scorched, not living grass — the
- * plains tile's default art is lush green, wrong for a place whose own briefing describes
- * it as ash-choked. Swaps every plains cell to the desaturated third art variant
- * (plains003.png) instead. Add a mission id here rather than touching its terrain type: it's
- * still mechanically plains (same move cost, same defense), just dressed differently. */
+/** Missions whose open ground is meant to read as dead/scorched, not living grass.
+ * Swaps every plains cell to the Cinza art variant (plains005.png). Still mechanically plains. */
 const DEAD_GROUND_MISSIONS = new Set(["portao"]);
-const DEAD_GROUND_VARIANT = 0;
+const DEAD_GROUND_VARIANT = 4;
 
 function applyDeadGround(mission: Mission): Mission {
   if (!DEAD_GROUND_MISSIONS.has(mission.id)) return mission;

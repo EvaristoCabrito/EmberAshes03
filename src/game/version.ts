@@ -1,5 +1,5 @@
 /** `package.json` holds the one version number; vite.config.ts injects it here
- * as `__APP_VERSION__`. The title screen shows major.minor ("V. 0.26"), so a
+ * as `__APP_VERSION__`. The title screen shows major.minor ("Version 0.2666"), so a
  * bump in package.json moves the screen too — no second copy to forget. */
 export const APP_VERSION = __APP_VERSION__;
 

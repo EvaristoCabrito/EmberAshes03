@@ -2,11 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, Pencil, RotateCcw, Shield, Swords, Volume2, VolumeX, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { loadGameArt, TILE_VARIANT_COUNT, tileVariantName, tileVariantSrc } from "./assets";
-import { installAudioUnlock, playMenuMusic, playTheme, resumeAudio, setMuted, sfxPlay, stopMusic, unlockAudio } from "./audio";
+import { installAudioUnlock, playFile, playMenuMusic, playTheme, resumeAudio, setMuted, sfxPlay, stopMusic, unlockAudio } from "./audio";
 import { BattleCanvas } from "./BattleCanvas";
 import { InnScreen } from "./InnScreen";
 import { BackpackScreen, PaperDollScreen } from "./InventoryScreens";
-import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, CURE_DISEASE, CURES, DECORATIONS, DOUBLE_STRIKE, EQUIPMENT, EXP_TO_LEVEL, FIREBALL, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, MAGIC_MISSILE, PIERCING, PIERCING_THRUST, MAX_LEVEL, POTIONS, POTION_LOOT_WEIGHT, PROMOTE_LEVEL, PROMOTED_BASE, PROMOTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, TERRAIN, WEAPONS, WEAPON_MAX_ENH, WEB_OF_DREAMS, BAG_MAX, LOCKPICK_PRICE, POTION_CARRY_MAX, POTION_PRICE, barricadeDecor, decorationCells, decorationImage, diceFormula, emberForKill, enemyLevelFor, equippedPouchId, fireballFormula, lightningFormula, dressMap, isSummonClass, SUMMON_CLASSES, parseLayout, potionLabel, pouchIcon, rangeLabel, sheetLine, spellFormula, spellTier, startingBags, statsFor, terrainNote, tierKey, tierUses, weaponEnhCost, weaponSellValue, type SpellTier } from "./data";
+import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, CURE_DISEASE, CURES, DECORATIONS, DOUBLE_STRIKE, EQUIPMENT, EXP_TO_LEVEL, FIREBALL, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, MAGIC_MISSILE, PIERCING, PIERCING_THRUST, MAX_LEVEL, POTIONS, POTION_LOOT_WEIGHT, PROMOTE_LEVEL, PROMOTED_BASE, PROMOTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, TERRAIN, WEAPONS, WEAPON_MAX_ENH, WEB_OF_DREAMS, BAG_MAX, LOCKPICK_PRICE, POTION_CARRY_MAX, POTION_PRICE, barricadeDecor, decorationCells, decorationImage, diceFormula, emberForKill, enemyLevelFor, equippedPouchId, fireballFormula, lightningFormula, dressMap, isSummonClass, MUSIC_TRACKS, SUMMON_CLASSES, parseLayout, potionLabel, pouchIcon, rangeLabel, sheetLine, spellFormula, spellTier, startingBags, statsFor, terrainNote, tierKey, tierUses, weaponEnhCost, weaponSellValue, type SpellTier } from "./data";
 import { BattleEngine } from "./engine";
 import { WorldMapScreen } from "./WorldMapScreen";
 import { DISPLAY_VERSION } from "./version";
@@ -46,6 +46,8 @@ function hudBlank(): HudSnapshot {
     busy: false,
     result: null,
     winAvailable: false,
+    canUndoMove: false,
+    targetPrompt: null,
     zoom: 1,
     speedMode: "normal",
     tip: null,
@@ -615,6 +617,16 @@ export function GameApp() {
     // instead of falling through to the menu theme below — a win screen or a briefing
     // is still "in" that mission, not back at the title.
     const inMission = screen === "battle" || screen === "victory" || screen === "defeat" || screen === "briefing";
+    // A mission that names its own track wins over every rule below: the chain of ids after
+    // this is the default for missions that never picked one.
+    // Only a track that is actually there wins: a name left behind by a renamed or removed
+    // file falls through to the theme chain instead of leaving the mission silent.
+    const named = inMission ? ALL_MISSIONS.find((m) => m.id === missionId)?.music : undefined;
+    const chosen = named && MUSIC_TRACKS.includes(named) ? named : undefined;
+    if (chosen) {
+      playFile(chosen);
+      return;
+    }
     if (inMission && missionId === "templo") {
       playTheme("temple");
       return;
@@ -1169,9 +1181,9 @@ function TitleScreen({
       <div className="relative z-10 flex flex-1 flex-col justify-end px-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] max-w-xl mx-auto w-full">
         <p className="text-sm tracking-[0.28em] uppercase text-muted mb-3">Táticas em cinzas</p>
         <h1 className="font-display text-5xl sm:text-7xl font-medium tracking-tight leading-none mb-4">Ember</h1>
-        <p className="text-[11px] tracking-[0.18em] uppercase text-muted -mt-3 mb-4">V. {DISPLAY_VERSION}</p>
+        <p className="text-[11px] tracking-[0.18em] uppercase text-muted -mt-3 mb-4">Version {DISPLAY_VERSION}</p>
         <p className="text-muted text-base leading-relaxed mb-8 max-w-md">
-          Três sobreviventes. Um tabuleiro de guerra. Cada casa conta.
+          Seis sobreviventes. Um tabuleiro de guerra. Cada casa conta.
         </p>
         <div className="flex flex-col gap-3">
           <Button size="xl" disabled={!ready} onClick={onNew}>
@@ -1539,6 +1551,8 @@ function blankDraft(): MapDraft {
     rows: EDITOR_ROWS_DEFAULT,
     tiles: Array.from({ length: EDITOR_COLS_DEFAULT * EDITOR_ROWS_DEFAULT }, () => "plains" as TerrainId),
     tileVariants: Array.from({ length: EDITOR_COLS_DEFAULT * EDITOR_ROWS_DEFAULT }, () => 0),
+    tileRots: Array.from({ length: EDITOR_COLS_DEFAULT * EDITOR_ROWS_DEFAULT }, () => 0),
+    music: "",
     decorations: [],
     playerSpawns: [],
     enemySpawns: [],
@@ -1576,6 +1590,8 @@ function missionToDraft(m: Mission): MapDraft {
     rows: m.rows,
     tiles: parseLayout(m.layout),
     tileVariants: Array.from({ length: n }, (_, i) => variants[i] ?? 0),
+    tileRots: Array.from({ length: n }, (_, i) => m.tileRots?.[i] ?? 0),
+    music: m.music ?? "",
     decorations: m.decorations ?? [],
     playerSpawns: m.playerSpawns.map((s) => ({ ...s, level: DEFAULT_TEST_LEVEL })),
     enemySpawns: m.enemySpawns.map((s) => ({ ...s, level: enemyLevelFor(m.index) })),
@@ -1594,6 +1610,10 @@ const DEFAULT_HEROES: { name: string; classId: ClassId }[] = [
  * as a summon, so a summon is grouped as one wherever it was placed from. */
 /** Every spawn list, in the order a cell is searched for whoever stands on it. */
 const SPAWN_KEYS: SpawnKey[] = ["playerSpawns", "enemySpawns", "neutralSpawns"];
+
+/** Sorts display names the way a Portuguese reader scans a list: case and accents ignored,
+ * so "Água" lands with the A's and not after Z. */
+const byName = (a: string, b: string) => a.localeCompare(b, "pt-BR", { sensitivity: "base" });
 
 /** The grid letter's colour, by side: blue ally, green neutral, red enemy. */
 const SIDE_INK: Record<"player" | "enemy" | "neutral", string> = {
@@ -1750,8 +1770,14 @@ const BUILDER_TERRAIN: TerrainId[] = [
 ];
 
 const VARIANT_LABEL: Partial<Record<TerrainId, string[]>> = {
-  woods: ["Bosque", "Sebes"],
-  water: ["Água", "Praia"],
+  plains: ["Planície", "Antiga", "Terra", "Pedra", "Cinza"],
+  woods: ["Bosque", "Sebes", "Pinhal", "Bosque 04"],
+  ruins: ["Ruínas", "Pedra 02", "Pedra 03", "Pedra 04"],
+  water: ["Água", "Antiga", "Praia", "Pântano", "Costa baixo", "Costa esq.", "Costa dir.", "Mar fundo", "Mar fundo 2", "Costa 01", "Costa 02", "Ponta baixo 01", "Ponta baixo 02", "Água rasa", "Água rasa 2", "Água costa", "Água costa 2"],
+  ember: ["Brasa", "Brasa 2", "Antiga"],
+  hill: ["Barranco", "Antigo"],
+  flame: ["Chama", "Antiga"],
+  column: ["Coluna", "Antiga"],
 };
 
 /** Hover text for a terrain type: its combat stats plus terrainNote()'s callout, so the
@@ -1785,6 +1811,8 @@ function MapEditorScreen({
   const [draft, setDraft] = useState<MapDraft>(() => initialDraft ?? blankDraft());
   const [brush, setBrush] = useState<TerrainId>("plains");
   const [variant, setVariant] = useState(0);
+  // While armed, clicking a hex in Terreno mode turns it instead of painting it.
+  const [turning, setTurning] = useState(false);
   const [decoBrush, setDecoBrush] = useState<string>(Object.keys(DECORATIONS)[0]!);
   const [mode, setMode] = useState<"paint" | "player" | "enemy" | "summon" | "decoration">("paint");
   // Which summon class the "Invocação" brush drops. Summons live in playerSpawns alongside
@@ -1923,6 +1951,26 @@ function MapEditorScreen({
     });
   };
 
+  /** Turns one hex's art a sixth of a circle. The tile, its variant and everything standing
+   * on it are left alone — only which way the picture points, which is what makes a coast, a
+   * road or a wall meet its neighbour instead of running the wrong way. Six presses come
+   * back to where it started. */
+  /** Where the red dot sits for a given turn: the hex's bottom side, carried around with the
+   * art. Sixty degrees per step, measured from straight down, as a fraction of the cell's
+   * half-height so both grids can place it the same way. */
+  const bottomDot = (rot: number, radius: number) => {
+    const a = Math.PI / 2 + ((rot % 6) * Math.PI) / 3;
+    return { dx: Math.cos(a) * radius, dy: Math.sin(a) * radius };
+  };
+
+  const turnTile = (i: number) => {
+    setDraft((d) => {
+      const tileRots = (d.tileRots ?? Array.from({ length: d.tiles.length }, () => 0)).slice();
+      tileRots[i] = ((tileRots[i] ?? 0) + 1) % 6;
+      return { ...d, tileRots };
+    });
+  };
+
   const toggleSpawn = (x: number, y: number) => {
     setDraft((d) => {
       // Summons share the spawn list of the side they belong to — the class itself says a
@@ -2006,7 +2054,13 @@ function MapEditorScreen({
 
   const onCellClick = (x: number, y: number) => {
     const i = y * draft.cols + x;
-    if (mode === "paint") setTile(i, brush);
+    if (mode === "paint") {
+      if (turning) {
+        turnTile(i);
+        const now = (((draft.tileRots?.[i] ?? 0) + 1) % 6) * 60;
+        setNote(`${TERRAIN[draft.tiles[i]!].name} em ${x},${y}: girado para ${now}°${now === 0 ? " (de volta ao original)" : ""}.`);
+      } else setTile(i, brush);
+    }
     else if (mode === "decoration") {
       const def = DECORATIONS[decoBrush];
       const existing = draft.decorations.some((p) => {
@@ -2027,11 +2081,13 @@ function MapEditorScreen({
     setDraft((d) => {
       const tiles: TerrainId[] = [];
       const tileVariants: number[] = [];
+      const tileRots: number[] = [];
       for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
           const inOld = r < d.rows && c < d.cols;
           tiles.push(inOld ? (d.tiles[r * d.cols + c] ?? "plains") : "plains");
           tileVariants.push(inOld ? (d.tileVariants[r * d.cols + c] ?? 0) : 0);
+          tileRots.push(inOld ? (d.tileRots?.[r * d.cols + c] ?? 0) : 0);
         }
       }
       const inBounds = (s: Spawn) => s.x < cols && s.y < rows;
@@ -2046,6 +2102,7 @@ function MapEditorScreen({
         rows,
         tiles,
         tileVariants,
+        tileRots,
         decorations,
         playerSpawns: d.playerSpawns.filter(inBounds),
         enemySpawns: d.enemySpawns.filter(inBounds),
@@ -2150,7 +2207,12 @@ function MapEditorScreen({
     setNote(`v${serial} excluída.`);
   };
 
-  const classOptions = Object.keys(CLASSES) as ClassId[];
+  // Every list the editor offers is sorted by what it shows, not by the order things were
+  // declared in — a class table grouped by role is fine to read in code and useless to
+  // search in a dropdown. pt-BR collation so accents and case sort where a reader expects.
+  const classOptions = (Object.keys(CLASSES) as ClassId[]).sort((a, b) => byName(CLASSES[a].name, CLASSES[b].name));
+  const summonOptions = [...SUMMON_CLASSES].sort((a, b) => byName(CLASSES[a].name, CLASSES[b].name));
+  const decorOptions = Object.values(DECORATIONS).sort((a, b) => byName(a.name, b.name));
 
   /** Whatever unit stands on a cell, across all three spawn lists. */
   const spawnAt = (x: number, y: number) => {
@@ -2217,6 +2279,7 @@ function MapEditorScreen({
                 ...d,
                 tiles,
                 tileVariants: tiles.map((t, i) => Math.min(d.tileVariants[i] ?? 0, (TILE_VARIANT_COUNT[t] ?? 1) - 1)),
+                tileRots: tiles.map((_t, i) => d.tileRots?.[i] ?? 0),
                 decorations,
               }));
               const counts = new Map<TerrainId, number>();
@@ -2294,6 +2357,28 @@ function MapEditorScreen({
               value={draft.place}
               onChange={(e) => setDraft((d) => ({ ...d, place: e.target.value }))}
             />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-muted text-xs uppercase tracking-wide">Trilha</span>
+            <select
+              className="bg-bg border border-border rounded-md px-2 py-1.5"
+              value={draft.music ?? ""}
+              onChange={(e) => {
+                const v = e.target.value;
+                setDraft((d) => ({ ...d, music: v }));
+                setNote(v ? `Trilha desta missão: ${v}.` : "Trilha desta missão: a do tema padrão.");
+              }}
+            >
+              <option value="">Tema padrão (pelo id da missão)</option>
+              {[...MUSIC_TRACKS].sort(byName).map((f) => (
+                <option key={f} value={f}>
+                  {f}
+                </option>
+              ))}
+            </select>
+            <span className="text-muted text-[11px]">
+              Os arquivos de public/game/MUSIC, pelo nome. Toca durante o briefing, a batalha e as telas de fim.
+            </span>
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-muted text-xs uppercase tracking-wide">Objetivo</span>
@@ -2466,7 +2551,20 @@ function MapEditorScreen({
 
         {mode === "paint" && (
           <div className="flex flex-col gap-2">
-            <p className="text-xs text-muted">Básicos na campanha: planície, bosque, água. Aqui pinta qualquer um.</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-xs text-muted flex-1 min-w-[12rem]">Básicos na campanha: planície, bosque, água. Aqui pinta qualquer um.</p>
+              <Button
+                size="sm"
+                variant={turning ? "primary" : "ghost"}
+                onClick={() => {
+                  setTurning((v) => !v);
+                  setNote(turning ? "Pincel de volta: clicar pinta o terreno." : "Girar armado: cada clique num hex vira o desenho 60°, sem trocar o terreno. O ponto vermelho mostra onde é o lado de baixo.");
+                }}
+                title="Gira o desenho do hex 60° por clique, para casar costa, estrada e muro com o vizinho. O terreno e a variante não mudam; seis cliques voltam ao original."
+              >
+                {turning ? "Girando — clique num hex" : "Girar hex"}
+              </Button>
+            </div>
             <div className="flex flex-wrap gap-1.5">
               {BUILDER_TERRAIN.map((t) => (
                 <button
@@ -2510,7 +2608,7 @@ function MapEditorScreen({
               coberta fica intransponível e bloqueia visão/tiro, não importa o terreno por baixo.
             </p>
             <div className="flex flex-wrap gap-1.5">
-              {Object.values(DECORATIONS).map((dec) => (
+              {decorOptions.map((dec) => (
                 <button
                   key={dec.id}
                   type="button"
@@ -2562,7 +2660,7 @@ function MapEditorScreen({
                 value={summonBrush}
                 onChange={(e) => setSummonBrush(e.target.value as ClassId)}
               >
-                {SUMMON_CLASSES.map((c) => (
+                {summonOptions.map((c) => (
                   <option key={c} value={c}>
                     {CLASSES[c].name} · {CLASSES[c].role}
                   </option>
@@ -2591,7 +2689,7 @@ function MapEditorScreen({
           {gridStyle === "square" ? (
             <div
               className="grid gap-px w-max"
-              style={{ gridTemplateColumns: `repeat(${draft.cols}, 22px)` }}
+              style={{ gridTemplateColumns: `repeat(${draft.cols}, 56px)` }}
             >
               {draft.tiles.map((t, i) => {
                 const x = i % draft.cols;
@@ -2604,9 +2702,25 @@ function MapEditorScreen({
                     type="button"
                     title={occ ? spawnHint(occ.sp, occ.side) : (deco ?? terrainHint(t, draft.tileVariants[i] ?? 0))}
                     onClick={() => onCellClick(x, y)}
-                    className={`size-[22px] grid place-items-center text-[9px] font-bold ${deco ? "outline outline-2 outline-offset-[-2px] outline-amber-400/80" : ""}`}
+                    className={`relative size-[56px] grid place-items-center text-sm font-bold ${deco ? "outline outline-2 outline-offset-[-2px] outline-amber-400/80" : ""}`}
                     style={{ background: TERRAIN_SWATCH[t] }}
                   >
+                    {/* The type's own colour fills the cell; the serial names which art
+                        variant is painted there; the red dot marks the hex's bottom side, so
+                        a turned tile can be read without clicking it. */}
+                    <span className="absolute inset-0 grid place-items-center text-[11px] font-semibold text-white [text-shadow:0_1px_2px_rgba(0,0,0,0.95)]">
+                      {String((draft.tileVariants[i] ?? 0) + 1).padStart(3, "0")}
+                    </span>
+                    {(() => {
+                      const { dx, dy } = bottomDot(draft.tileRots?.[i] ?? 0, 21);
+                      return (
+                        <span
+                          className="absolute size-[7px] rounded-full bg-red-500 ring-1 ring-black/60"
+                          style={{ left: 28 + dx - 3.5, top: 28 + dy - 3.5 }}
+                          title={`lado de baixo · girado ${((draft.tileRots?.[i] ?? 0) * 60)}°`}
+                        />
+                      );
+                    })()}
                     {occ ? (
                       <span className={SIDE_INK[occ.side]}>{spawnGlyph(occ.sp, occ.side)}</span>
                     ) : deco ? (
@@ -2618,7 +2732,10 @@ function MapEditorScreen({
             </div>
           ) : (
             (() => {
-              const HR = 13;
+              // The editor grid is where the map actually gets read: the old 13 left the
+              // per-hex serial nowhere to sit, and the serial now sits in the middle with a
+              // facing dot around it, so it wants the room.
+              const HR = 32;
               const SQRT3 = Math.sqrt(3);
               const hexW = SQRT3 * HR;
               const hexH = 2 * HR;
@@ -2639,7 +2756,7 @@ function MapEditorScreen({
                         type="button"
                         title={occ ? spawnHint(occ.sp, occ.side) : (deco ?? terrainHint(t, draft.tileVariants[i] ?? 0))}
                         onClick={() => onCellClick(x, y)}
-                        className={`absolute grid place-items-center text-[8px] font-bold border ${deco ? "border-amber-400" : "border-black/20"}`}
+                        className={`absolute grid place-items-center text-sm font-bold border ${deco ? "border-amber-400" : "border-black/20"}`}
                         style={{
                           left: cx - hexW / 2,
                           top: cy - HR,
@@ -2649,11 +2766,27 @@ function MapEditorScreen({
                           clipPath: "polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)",
                         }}
                       >
+                        {/* The type's own colour fills the hex; the serial names which art
+                            variant is painted there; the red dot marks the hex's bottom
+                            side, so a turned tile reads without clicking it. */}
+                        <span className="absolute inset-0 grid place-items-center text-[11px] font-semibold text-white [text-shadow:0_1px_2px_rgba(0,0,0,0.95)]">
+                          {String((draft.tileVariants[i] ?? 0) + 1).padStart(3, "0")}
+                        </span>
+                        {(() => {
+                          const { dx, dy } = bottomDot(draft.tileRots?.[i] ?? 0, HR * 0.66);
+                          return (
+                            <span
+                              className="absolute size-[7px] rounded-full bg-red-500 ring-1 ring-black/60"
+                              style={{ left: hexW / 2 + dx - 3.5, top: HR + dy - 3.5 }}
+                              title={`lado de baixo · girado ${((draft.tileRots?.[i] ?? 0) * 60)}°`}
+                            />
+                          );
+                        })()}
                         {occ ? (
-                      <span className={SIDE_INK[occ.side]}>{spawnGlyph(occ.sp, occ.side)}</span>
-                    ) : deco ? (
-                      <span className="text-amber-300">D</span>
-                    ) : null}
+                          <span className={SIDE_INK[occ.side]}>{spawnGlyph(occ.sp, occ.side)}</span>
+                        ) : deco ? (
+                          <span className="text-amber-300">D</span>
+                        ) : null}
                       </button>
                     );
                   })}
@@ -3324,6 +3457,23 @@ function BattleScreen({
             </div>
           </div>
         )}
+        {hud.targetPrompt && !hud.result && (
+          <div className="pointer-events-none absolute inset-x-0 top-14 flex justify-center px-3">
+            <div className="bg-surface border-2 border-accent rounded-lg px-4 py-2.5 text-center shadow-lg">
+              <p className="font-display text-lg tracking-wide leading-tight">
+                Escolha {hud.targetPrompt.need} alvo{hud.targetPrompt.need > 1 ? "s" : ""}
+              </p>
+              <p className="text-sm text-muted mt-0.5">
+                {hud.targetPrompt.picked} de {hud.targetPrompt.need} escolhido{hud.targetPrompt.picked === 1 ? "" : "s"}
+                {" · "}
+                {hud.targetPrompt.need - hud.targetPrompt.picked === 1
+                  ? "falta 1"
+                  : `faltam ${hud.targetPrompt.need - hud.targetPrompt.picked}`}
+                {" · pode repetir o mesmo alvo"}
+              </p>
+            </div>
+          </div>
+        )}
         {hud.tip && !(hud.winAvailable && !winPopupDismissed) && (
           <div className="pointer-events-none absolute inset-x-2 bottom-2">
             <p className="bg-surface/90 border border-border rounded-md px-2 py-1 text-xs text-muted text-center">{hud.tip}</p>
@@ -3514,6 +3664,11 @@ function BattleScreen({
               Encerrar missão
             </Button>
           )}
+          {hud.canUndoMove && !hud.result && (
+            <Button size="sm" variant="ghost" title="Volta ao ponto onde o turno começou e devolve todo o movimento gasto. Some assim que você age." onClick={() => engine.undoMove()}>
+              Desfazer movimento
+            </Button>
+          )}
           <Button size="sm" variant="ghost" className={hud.winAvailable && !hud.result ? "" : "ml-auto"} disabled={hud.phase !== "player" || !!hud.result} onClick={() => engine.endTurn()}>
             Fim do turno
           </Button>
@@ -3696,7 +3851,7 @@ function StatusPanel({ unit, bagIcon, onClose, onOpenInventory, onOpenEquipment 
     ["MAG", unit.mag],
     ["DEF", unit.def],
     ["RES", unit.res],
-    ["MOV", unit.mov],
+    ["MOV", unit.movLeft < unit.mov ? `${unit.movLeft}/${unit.mov}` : unit.mov],
     ["Alcance", rangeLabel(unit.minRange, unit.maxRange)],
   ];
   const base = PROMOTED_BASE[unit.classId] ?? unit.classId;

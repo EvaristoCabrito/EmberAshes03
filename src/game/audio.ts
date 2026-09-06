@@ -270,38 +270,44 @@ function getTrack(theme: Theme): HTMLAudioElement | null {
   if (typeof Audio === "undefined") return null;
   if (theme === "intro") return menuElement();
   if (theme === "temple") {
-    if (!templeEl) templeEl = attachTrack(new Audio("/game/music/temple.mp3"), 0.42);
+    if (!templeEl) templeEl = attachTrack(new Audio("/game/MUSIC/temple.mp3"), 0.42);
     return templeEl;
   }
   if (theme === "aldeia") {
-    if (!aldeiaEl) aldeiaEl = attachTrack(new Audio("/game/music/aldeia.mp3?v=2"), 0.4);
+    if (!aldeiaEl) aldeiaEl = attachTrack(new Audio("/game/MUSIC/aldeia.mp3?v=2"), 0.4);
     return aldeiaEl;
   }
   if (theme === "siege") {
-    if (!siegeEl) siegeEl = attachTrack(new Audio("/game/music/siege.mp3"), 0.4);
+    if (!siegeEl) siegeEl = attachTrack(new Audio("/game/MUSIC/siege.mp3"), 0.4);
     return siegeEl;
   }
   if (theme === "inn") {
-    if (!innEl) innEl = attachTrack(new Audio("/game/music/inn.mp3"), 0.4);
+    if (!innEl) innEl = attachTrack(new Audio("/game/MUSIC/inn.mp3"), 0.4);
     return innEl;
   }
   if (theme === "hill") {
-    if (!hillEl) hillEl = attachTrack(new Audio("/game/music/hill.mp3"), 0.4);
+    if (!hillEl) hillEl = attachTrack(new Audio("/game/MUSIC/hill.mp3"), 0.4);
     return hillEl;
   }
   if (theme === "portao") {
-    if (!portaoEl) portaoEl = attachTrack(new Audio("/game/music/portao.mp3"), 0.4);
+    if (!portaoEl) portaoEl = attachTrack(new Audio("/game/MUSIC/portao.mp3"), 0.4);
     return portaoEl;
   }
   if (theme === "early") {
-    if (!earlyEl) earlyEl = attachTrack(new Audio("/game/music/early.mp3"), 0.4);
+    if (!earlyEl) earlyEl = attachTrack(new Audio("/game/MUSIC/early.mp3"), 0.4);
     return earlyEl;
   }
   if (theme === "worldMap") {
-    if (!worldMapEl) worldMapEl = attachTrack(new Audio("/game/music/worldmap.mp3"), 0.4);
+    // The world map's own piece, under the name it was delivered as. Encoded because that
+    // name carries spaces.
+    if (!worldMapEl)
+      worldMapEl = attachTrack(new Audio(`/game/MUSIC/${encodeURIComponent("Tragic Architecture True Persona-WorldMap-Balanced-High.mp3")}`), 0.4);
     return worldMapEl;
   }
-  if (!battleEl) battleEl = attachTrack(new Audio("/game/music/music.mp3"), 0.4);
+  // The battle theme's own track, recovered from an earlier build's output where it was the
+  // only copy left — it had gone missing from public/game/MUSIC while the code still asked
+  // for it, which is why nothing played here.
+  if (!battleEl) battleEl = attachTrack(new Audio("/game/MUSIC/music.mp3"), 0.4);
   return battleEl;
 }
 
@@ -317,7 +323,7 @@ function menuElement(): HTMLAudioElement | null {
     });
   }
   if (introEl) return introEl;
-  const node = new Audio("/game/music/intro.wav");
+  const node = new Audio("/game/MUSIC/intro.mp3");
   node.id = "ember-intro";
   node.loop = true;
   node.preload = "auto";
@@ -377,6 +383,39 @@ function kickPlay(el: HTMLAudioElement): void {
   tryOnce();
 }
 
+/** Tracks played by file name rather than by theme — what a mission's own music setting
+ * asks for. One element per file, made once and kept, same as the fixed themes. */
+const fileEls = new Map<string, HTMLAudioElement>();
+
+function getFileTrack(file: string): HTMLAudioElement | null {
+  if (typeof Audio === "undefined") return null;
+  const have = fileEls.get(file);
+  if (have) return have;
+  const el = attachTrack(new Audio(`/game/MUSIC/${encodeURIComponent(file)}`), 0.4);
+  fileEls.set(file, el);
+  return el;
+}
+
+/** Plays one specific file from public/game/MUSIC, silencing everything else — the escape
+ * hatch from the fixed Theme list, so a mission can name its own track. */
+export function playFile(file: string): void {
+  if (muted) return;
+  const want = getFileTrack(file);
+  silenceAllBut(want);
+  if (!want) return;
+  kickPlay(want);
+}
+
+/** Stops every track except the one asked for, themes and per-file alike. */
+function silenceAllBut(want: HTMLAudioElement | null): void {
+  const others = [introEl, battleEl, earlyEl, templeEl, aldeiaEl, siegeEl, innEl, hillEl, portaoEl, worldMapEl, ...fileEls.values()];
+  for (const el of others) {
+    if (!el || el === want) continue;
+    el.pause();
+    if (el !== introEl) el.currentTime = 0;
+  }
+}
+
 export function playTheme(theme: Theme): void {
   currentTheme = theme;
   if (muted) return;
@@ -417,6 +456,12 @@ export function playTheme(theme: Theme): void {
   if (worldMapEl && worldMapEl !== want) {
     worldMapEl.pause();
     worldMapEl.currentTime = 0;
+  }
+  // A mission that named its own track may be playing; a fixed theme has to silence it too.
+  for (const el of fileEls.values()) {
+    if (el === want) continue;
+    el.pause();
+    el.currentTime = 0;
   }
   if (!want) return;
   kickPlay(want);
@@ -473,6 +518,7 @@ export function stopMusic(): void {
   hillEl?.pause();
   portaoEl?.pause();
   worldMapEl?.pause();
+  for (const el of fileEls.values()) el.pause();
 }
 
 export function resumeAudio(): void {

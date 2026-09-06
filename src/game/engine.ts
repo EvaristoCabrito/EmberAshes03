@@ -1,4 +1,4 @@
-import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, CURE_DISEASE, CURES, DECORATIONS, DISEASE, DOUBLE_STRIKE, EMPTY_BAG, EQUIPMENT, EXP_TO_LEVEL, expForHit, FIREBALL, FOOTPRINT_TYPE_7, FOOTPRINT_TYPE_8, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, MAGIC_MISSILE, magicMissileCount, MAX_LEVEL, PIERCING, PIERCING_THRUST, POTION_CARRY_MAX, POTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, WEAPON_MAX_ENH, WEAPONS, WEB_OF_DREAMS, cureSpan, barricadeDecor, decorationCells, diceFormula, effectiveMaxRange, enemyLevelFor, fireballFormula, fireballOrigin, fireballPower, fireballRangeTiles, fireballTiles, hexAreaTiles, isProjectile, isSummonClass, lightningDice, lightningFormula, missionGearLevel, parseLayout, potionLabel, rollCure, rollDice, rollPotion, spellFormula, spellTier, starterWeaponFor, STARTING_BAG, statsFor, terrainNote, TERRAIN, tierKey, tierUses, gearStatBonus, offHandBlocked, weaponRoll, weightedLootPick, weightedPotionPick, weightedWeaponPick } from "./data";
+import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, CURE_DISEASE, CURES, DECORATIONS, DISEASE, DOUBLE_STRIKE, EMPTY_BAG, EQUIPMENT, EXP_TO_LEVEL, expForHit, FIREBALL, FOOTPRINT_TYPE_7, FOOTPRINT_TYPE_8, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, MAGIC_MISSILE, magicMissileCount, MAX_LEVEL, PIERCING, PIERCING_THRUST, POTION_CARRY_MAX, POTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, WEAPON_MAX_ENH, WEAPONS, WEB_OF_DREAMS, cureSpan, barricadeDecor, decorationCells, decorationImage, diceFormula, effectiveMaxRange, enemyLevelFor, fireballFormula, fireballOrigin, fireballPower, fireballRangeTiles, fireballTiles, hexAreaTiles, isProjectile, isSummonClass, lightningDice, lightningFormula, missionGearLevel, parseLayout, potionLabel, rollCure, rollDice, rollPotion, spellFormula, spellTier, starterWeaponFor, STARTING_BAG, statsFor, terrainNote, TERRAIN, tierKey, tierUses, gearStatBonus, offHandBlocked, weaponRoll, weightedLootPick, weightedPotionPick, weightedWeaponPick } from "./data";
 import type { SpellTier } from "./data";
 import { canCounter, makeForecast, mulberry32, powerOf, protOf, rollDamage, rollDamageCustom } from "./combat";
 import {
@@ -205,7 +205,7 @@ type Active =
   | { type: "banner"; text: string; t: number; dur: number }
   | { type: "delay"; t: number; dur: number };
 
-function pub(u: Unit, restrained: boolean): UnitPublic {
+function pub(u: Unit, restrained: boolean, movLeft: number): UnitPublic {
   return {
     id: u.id,
     name: u.name,
@@ -221,6 +221,7 @@ function pub(u: Unit, restrained: boolean): UnitPublic {
     def: u.def,
     res: u.res,
     mov: u.mov,
+    movLeft,
     minRange: u.minRange,
     maxRange: u.maxRange,
     moved: u.moved,
@@ -397,6 +398,8 @@ export class BattleEngine {
   readonly tiles: TerrainId[];
   /** Art variant index per tile, same indexing as tiles. Undefined/missing = variant 0. */
   readonly tileVariants: number[];
+  /** How far each tile's art is turned, in sixths of a circle. */
+  readonly tileRots: number[];
   readonly decorations: DecorationPlacement[];
   readonly cols: number;
   readonly rows: number;
@@ -419,6 +422,10 @@ export class BattleEngine {
    * START of that turn — decided once in beginUnitTurn and left alone for the rest of it
    * (see effectiveUnitForReach). */
   private turnRestrained = false;
+  /** Where the active unit stood when its turn began, and whether anything irreversible has
+   * happened since — see undoMove. Cleared with the turn. */
+  private turnStart: Point | null = null;
+  private moveSpoiled = false;
   /** All alive units for this round, sorted by CLASSES[classId].init (lower first, ties favor the player). */
   private turnOrder: string[] = [];
   /** id of the unit whose turn we've already dispatched — lets the tick loop react only on change. */
@@ -494,23 +501,28 @@ export class BattleEngine {
     this.rows = mission.rows;
     this.tiles = parseLayout(mission.layout);
     this.tileVariants = mission.tileVariants ?? [];
+    this.tileRots = mission.tileRots ?? [];
     this.decorations = mission.decorations ?? [];
-    // Item decorations (locked chest) sit on chest/door terrain and keep that
-    // terrain's lockpick rules — don't overwrite them as columns.
-    const ITEM_DECO = new Set(["locked-chest"]);
+    // Art is loaded once at boot — a decoration added later (or after HMR) is in
+    // DECORATIONS and in the editor <img>, but missing from art.decorations, so combat
+    // used to skip it. Fill any hole so Testar paints the same props the editor lists.
     for (const p of this.decorations) {
-      if (ITEM_DECO.has(p.id)) continue;
+      if (this.art.decorations[p.id]?.naturalWidth) continue;
+      const img = new Image();
+      img.src = decorationImage(p.id);
+      this.art.decorations[p.id] = img;
+    }
+    // A decoration that names a tile (house, barricade, rocks) stamps that terrain so the
+    // picture and the rules cannot disagree. A prop with no tile — chest, tree, fallen log —
+    // sits on whatever hex was already painted. The old fallback to "column" is what made
+    // trunks show up as marble pillars in playtest.
+    for (const p of this.decorations) {
       const def = DECORATIONS[p.id];
-      if (!def) continue;
-      // A decoration declares the terrain it stands on (DecorationDef.tile) so the art and
-      // the rules cannot disagree: a house reads climbable and IS climbable, a barricade is
-      // barricade terrain and keeps the shoot-from-behind and troll rules. Only a prop that
-      // names no terrain of its own falls back to solid rock.
-      const under = def.tile ?? "column";
+      if (!def?.tile) continue;
       for (const { dx, dy } of def.footprint) {
         const x = p.x + dx;
         const y = p.y + dy;
-        if (x >= 0 && x < this.cols && y >= 0 && y < this.rows) this.tiles[y * this.cols + x] = under;
+        if (x >= 0 && x < this.cols && y >= 0 && y < this.rows) this.tiles[y * this.cols + x] = def.tile;
       }
     }
     this.decorations.push(...barricadeDecor(this.tiles, this.cols, this.rows, this.decorations));
@@ -560,6 +572,21 @@ export class BattleEngine {
     for (const fn of this.listeners) fn();
   }
 
+  /** How many targets an aimed spell still wants, for a spell that picks more than one.
+   *
+   * Magic Missile fires 2 missiles at level 3 and 3 at level 6, each aimed separately, and
+   * the only thing that ever said so was the tip line at the bottom of the screen — small,
+   * grey, and easy to walk straight past while wondering why the spell hasn't gone off. The
+   * HUD puts this where it has to be read. Null for a single-target cast, which needs no
+   * counting. */
+  private targetPrompt(): { name: string; need: number; picked: number } | null {
+    if (this.spellKind !== "magicMissile") return null;
+    const u = this.units.find((x) => x.id === this.selectedId);
+    if (!u) return null;
+    const need = magicMissileCount(u.level);
+    return need > 1 ? { name: MAGIC_MISSILE.name, need, picked: this.missileTargets.length } : null;
+  }
+
   getHud(): HudSnapshot {
     const selected = this.units.find((u) => u.id === this.selectedId) ?? null;
     const hoverCell = this.hover ?? this.cursor;
@@ -596,8 +623,8 @@ export class BattleEngine {
     return {
       phase: this.phase,
       banner: this.banner,
-      selected: selected ? pub(selected, this.isWebCell(selected.x, selected.y)) : null,
-      hoveredUnit: hoverUnit ? pub(hoverUnit, this.isWebCell(hoverUnit.x, hoverUnit.y)) : null,
+      selected: selected ? pub(selected, this.isWebCell(selected.x, selected.y), this.movLeft(selected)) : null,
+      hoveredUnit: hoverUnit ? pub(hoverUnit, this.isWebCell(hoverUnit.x, hoverUnit.y), this.movLeft(hoverUnit)) : null,
       terrain: terr
         ? {
             id: terr.id,
@@ -624,15 +651,17 @@ export class BattleEngine {
       busy: this.mode === "locked" || !!this.active || this.queue.length > 0,
       result: this.result,
       winAvailable: this.winAvailable,
+      canUndoMove: this.canUndoMove(),
+      targetPrompt: this.targetPrompt(),
       zoom: this.zoom,
       speedMode: this.speedMode,
       tip: this.tip,
       inspected: inspected
-        ? pub(inspected, this.isWebCell(inspected.x, inspected.y))
+        ? pub(inspected, this.isWebCell(inspected.x, inspected.y), this.movLeft(inspected))
         : pendingFoe
-          ? pub(pendingFoe, this.isWebCell(pendingFoe.x, pendingFoe.y))
+          ? pub(pendingFoe, this.isWebCell(pendingFoe.x, pendingFoe.y), this.movLeft(pendingFoe))
           : null,
-      pendingFoe: pendingFoe ? pub(pendingFoe, this.isWebCell(pendingFoe.x, pendingFoe.y)) : null,
+      pendingFoe: pendingFoe ? pub(pendingFoe, this.isWebCell(pendingFoe.x, pendingFoe.y), this.movLeft(pendingFoe)) : null,
       spellReady:
         this.mode === "awaitSpell" &&
         !!selected &&
@@ -887,8 +916,14 @@ export class BattleEngine {
         unit.drawX = to.x;
         unit.drawY = to.y;
         this.ensureVisible(unit.x, unit.y);
+        // Walking can change the world — a troll shoulders a barricade down, a hazard tile
+        // bites. Either one makes the move unrewindable: undoMove can put a unit back, it
+        // cannot un-break a wall or un-take damage. Note it and the undo bows out.
+        const hpBefore = unit.hp;
+        const propsBefore = this.decorations.length;
         this.smashBarricades(unit);
         this.applyTileHazard(unit, to);
+        if (unit.hp !== hpBefore || this.decorations.length !== propsBefore) this.moveSpoiled = true;
         if (!unit.alive) {
           this.active = null;
           this.selectedId = null;
@@ -1356,10 +1391,17 @@ export class BattleEngine {
   }
 
   /**
-   * Marks a unit as having acted this turn. A player unit that hasn't moved yet this turn
-   * stays selected so it can still use its one move (order-independent move+attack); a unit
-   * that already moved, is dead, or belongs to the enemy ends its turn immediately instead —
-   * leaving an enemy "selected" here would expose it to player input (move/attack picks).
+   * Marks a unit as having acted this turn.
+   *
+   * Movement is a pool of MOV per turn, not a single move that acting cancels: spend two
+   * hexes, cast, and the other three are still there to run with. So acting no longer ends
+   * the turn just because the unit had already walked — it stays selected with whatever
+   * budget is left. The turn ends here only when there is nothing left to do with it (the
+   * pool is empty), or for a unit that is dead or on the enemy side, where leaving anything
+   * "selected" would expose it to player input.
+   *
+   * What acting does close off is the refund: undoMove refuses once acted is set, because an
+   * action was taken from a position a rewind would erase.
    */
   private finishAction(u: Unit): void {
     u.acted = true;
@@ -1367,12 +1409,13 @@ export class BattleEngine {
     this.inspectedId = null;
     this.threat = [];
     this.attackFrom.clear();
-    const alreadyMoved = !u.alive || u.side !== "player" || !this.orig || u.x !== this.orig.x || u.y !== this.orig.y;
-    if (alreadyMoved) {
+    const spent = !u.alive || u.side !== "player" || u.mov - u.moveBudgetUsed <= 0;
+    if (spent) {
       u.moved = true;
       this.selectedId = null;
       this.reach.clear();
       this.orig = null;
+      this.turnStart = null;
       this.mode = this.phase === "player" ? "idle" : "locked";
       return;
     }
@@ -1428,7 +1471,7 @@ export class BattleEngine {
         // that is now walkable.
         for (let d = this.decorations.length - 1; d >= 0; d--) {
           const dec = this.decorations[d];
-          if (dec.id === "barricade" && dec.x === c.x && dec.y === c.y) this.decorations.splice(d, 1);
+          if ((dec.id === "barricade" || dec.id === "barricade-2") && dec.x === c.x && dec.y === c.y) this.decorations.splice(d, 1);
         }
         n += 1;
         this.emitParticle({
@@ -1696,6 +1739,55 @@ export class BattleEngine {
       unit.shock ? ` · Relâmpago ${diceFormula(unit.shock.dice, unit.shock.faces, unit.shock.bonus)} − RES no turno` : ""
     }${unit.diseased ? " · Doente (−10% em todos os stats)" : ""}${unit.poisoned ? " · Envenenado (1D4 dano por turno)" : ""}`;
     this.ensureVisible(unit.x, unit.y);
+    sfxPlay.ui();
+  }
+
+  /** Whether the movement taken this turn can still be taken back.
+   *
+   * Only for the player's own active unit, only while it is standing somewhere other than
+   * where its turn began, and only while nothing has been spent that a rewind could not
+   * honestly return: acting fixes the position the action was taken from, and a move that
+   * broke a barricade or crossed a hazard has already changed the board (see moveSpoiled). */
+  canUndoMove(): boolean {
+    const u = this.activeTurnUnit();
+    return (
+      !!u &&
+      u.side === "player" &&
+      u.alive &&
+      !u.acted &&
+      !u.moved &&
+      !this.moveSpoiled &&
+      !!this.turnStart &&
+      !this.active &&
+      this.queue.length === 0 &&
+      (u.x !== this.turnStart.x || u.y !== this.turnStart.y) &&
+      (this.mode === "selected" || this.mode === "awaitAction" || this.mode === "awaitAttack")
+    );
+  }
+
+  /** Puts the active unit back where its turn began and refunds every hex it walked — the
+   * whole budget, not the last hop, so a wrong click costs nothing. Undoing is not itself a
+   * move: the unit is left selected with its full reach, exactly as the turn opened. */
+  undoMove(): void {
+    if (!this.canUndoMove()) return;
+    const u = this.activeTurnUnit()!;
+    const back = this.turnStart!;
+    u.x = back.x;
+    u.y = back.y;
+    u.drawX = back.x;
+    u.drawY = back.y;
+    u.moveBudgetUsed = 0;
+    this.orig = { x: back.x, y: back.y };
+    this.pendingFoeId = null;
+    this.inspectedId = null;
+    this.threat = [];
+    this.selectedId = u.id;
+    this.mode = "selected";
+    this.reach = computeReachable(this.effectiveUnitForReach(u), this.tiles, this.cols, this.rows, this.units);
+    this.attackFrom = attackableEnemies(u, this.reach, this.units, this.tiles, this.cols);
+    this.ensureVisible(u.x, u.y);
+    this.centerOn(u.x, u.y);
+    this.tip = `${u.name} voltou ao ponto de partida — ${u.mov} de movimento de volta.`;
     sfxPlay.ui();
   }
 
@@ -2067,6 +2159,18 @@ export class BattleEngine {
    *
    * Both clamps use the same "shallow clone with one derived stat overridden" trick Piercing
    * Thrust's armor-ignore calc uses — the real Unit's own mov is never touched. */
+  /** Movement this unit has left this turn — the same figure effectiveUnitForReach grants
+   * it, surfaced so the panel counts down as the unit walks. The board already shrank its
+   * reach hex by hex; only the number was frozen at the untouched base all turn.
+   *
+   * The restrained clamp applies to whoever's turn it actually is and nobody else:
+   * turnRestrained is decided once, in beginUnitTurn, for the active unit, and says nothing
+   * about an enemy the player happens to be inspecting. */
+  private movLeft(u: Unit): number {
+    const remaining = Math.max(0, u.mov - u.moveBudgetUsed);
+    return this.turnRestrained && this.activeTurnUnit()?.id === u.id ? Math.min(remaining, 1) : remaining;
+  }
+
   private effectiveUnitForReach(u: Unit): Unit {
     const remaining = Math.max(0, u.mov - u.moveBudgetUsed);
     const cap = this.turnRestrained ? Math.min(remaining, 1) : remaining;
@@ -2927,6 +3031,8 @@ export class BattleEngine {
       this.pendingFoeId = null;
       this.inspectedId = null;
       this.orig = { x: u.x, y: u.y };
+      this.turnStart = { x: u.x, y: u.y };
+      this.moveSpoiled = false;
       this.reach = computeReachable(this.effectiveUnitForReach(u), this.tiles, this.cols, this.rows, this.units);
       this.attackFrom = attackableEnemies(u, this.reach, this.units, this.tiles, this.cols);
       this.threat = [];
@@ -3180,7 +3286,10 @@ export class BattleEngine {
       unit.drawX = unit.x;
       unit.drawY = unit.y;
       unit.moveBudgetUsed += stepCost;
-      if (unit.acted) {
+      // Having acted doesn't make this move the last one — it comes out of the same pool as
+      // any other. The turn ends when the pool runs dry (with the action already spent),
+      // never merely because the unit acted first.
+      if (unit.acted && unit.mov - unit.moveBudgetUsed <= 0) {
         unit.moved = true;
         this.selectedId = null;
         this.pendingFoeId = null;
@@ -3189,6 +3298,7 @@ export class BattleEngine {
         this.reach.clear();
         this.attackFrom.clear();
         this.orig = null;
+        this.turnStart = null;
         this.mode = "idle";
         return;
       }
@@ -3420,7 +3530,12 @@ export class BattleEngine {
     const SQRT3 = Math.sqrt(3);
     for (const p of this.decorations) {
       const def = DECORATIONS[p.id];
-      const img = this.art.decorations[p.id];
+      let img = this.art.decorations[p.id];
+      if ((!img || !img.naturalWidth) && def) {
+        img = this.art.decorations[p.id] ?? new Image();
+        if (!img.src) img.src = decorationImage(p.id);
+        this.art.decorations[p.id] = img;
+      }
       if (!def || !img) continue;
       let minDx = 0;
       let maxDx = 0;
@@ -3443,9 +3558,37 @@ export class BattleEngine {
       if (cx < -tile * 4 || cy < -tile * 4 || cx > cssW + tile * 4 || cy > cssH + tile * 4) continue;
       const one = def.footprint.length === 1;
       const item = p.id === "locked-chest";
-      const w = item ? tile * 0.92 : one ? tile * 1.55 : tile * SQRT3 * (maxDx - minDx + 1.7);
-      const h = item ? tile * 0.72 : one ? tile * 1.65 : tile * (1.5 * (maxDy - minDy) + 2.3);
-      const dy = item ? tile * 0.08 : 0;
+      const tree = p.id === "dead-tree";
+      const log = p.id === "fallen-log";
+      const wall = p.id === "barricade" || p.id === "barricade-2";
+      const house = p.id === "small-house" || p.id === "stone-hut";
+      const w = tree
+        ? tile * 1.28
+        : log
+          ? tile * SQRT3 * 2.05
+          : wall
+            ? tile * 1.42
+            : house
+              ? tile * 1.45
+              : item
+                ? tile * 0.92
+                : one
+                  ? tile * 1.55
+                  : tile * SQRT3 * (maxDx - minDx + 1.7);
+      const h = tree
+        ? tile * 2.55
+        : log
+          ? tile * 0.82
+          : wall
+            ? tile * 1.18
+            : house
+              ? tile * 1.58
+              : item
+                ? tile * 0.72
+                : one
+                  ? tile * 1.65
+                  : tile * (1.5 * (maxDy - minDy) + 2.3);
+      const dy = tree ? -tile * 0.55 : wall ? -tile * 0.12 : house ? -tile * 0.28 : item ? tile * 0.08 : 0;
       ctx.drawImage(img, cx - w / 2, cy - h / 2 + dy, w, h);
     }
   }
@@ -3487,6 +3630,22 @@ export class BattleEngine {
       }
     }
     return this.footprintCentroid(u.x, u.y, u.size, u.footprintW, u.footprintOffsets);
+  }
+
+  /** Walk-cycle frame for a unit mid-move, driven by how far along its path it actually is.
+   *
+   * Not by the global bob clock, which is what a walk cut got before and why none of them
+   * played: a hex step lasts 0.22s (0.12 in fast mode) and bob runs at 0.58x for anything
+   * size 4 or over, so a golem advanced barely half a frame per hex — measured, three of its
+   * eight frames across three hexes, starting on whichever one bob's random spawn value
+   * landed on. Tied to the path instead, every walk starts at frame 0 and runs a full loop
+   * every two hexes, at the same pace for a golem as for a familiar. */
+  private walkFrame(u: Unit, n: number): number {
+    const a = this.active;
+    if (n <= 1 || !a || a.type !== "move" || a.id !== u.id) return 0;
+    const dur = this.speedMode === "fast" ? 0.12 : 0.22;
+    const steps = a.i + Math.min(1, a.t / dur);
+    return Math.floor(steps * (n / 2)) % n;
   }
 
   private idleFrame(u: Unit, n: number): number {
@@ -3641,6 +3800,15 @@ export class BattleEngine {
         ctx.save();
         this.hexPath(ctx, cx, cy, tile * 1.0);
         ctx.clip();
+        // A turned hex spins about its own centre, inside the clip. Sixty degrees maps a
+        // hexagon onto itself, so only the picture moves — the shape stays put and the
+        // neighbours still line up.
+        const rot = this.tileRots[y * this.cols + x] ?? 0;
+        if (rot) {
+          ctx.translate(cx, cy);
+          ctx.rotate((rot * Math.PI) / 3);
+          ctx.translate(-cx, -cy);
+        }
         if (img) ctx.drawImage(img, cx - tile, cy - tile, tile * 2, tile * 2);
         else {
           ctx.fillStyle = "#1e1b18";
@@ -3867,7 +4035,7 @@ export class BattleEngine {
       const walk = atk == null && moving ? this.art.walks[u.sprite] : undefined;
       const frames = atk != null ? this.art.attacks[u.sprite] : walk ?? idle ?? this.art.sprites[u.sprite];
       const n = frames?.length ?? 0;
-      const fi = atk != null ? atk : this.idleFrame(u, n || 4);
+      const fi = atk != null ? atk : walk ? this.walkFrame(u, n) : this.idleFrame(u, n || 4);
       const walkDirs = moving ? this.art.walkDirs[u.sprite] : undefined;
       const img = (walkDirs ? walkDirs[u.walkPose] : undefined) ?? frames?.[fi] ?? frames?.[0];
       // The draw-size correction keys off the footprint SHAPE (reference equality against

@@ -6,14 +6,14 @@ import type { GameArt, SpriteId, TerrainId } from "./types";
 // different variant in Mission.tileVariants — keep it as the tile that's safe
 // for existing maps.
 export const TILE_VARIANT_COUNT: Record<TerrainId, number> = {
-  plains: 1,
-  woods: 2,
-  ruins: 1,
-  water: 2,
-  ember: 1,
-  hill: 1,
-  flame: 1,
-  column: 1,
+  plains: 5,
+  woods: 4,
+  ruins: 4,
+  water: 17,
+  ember: 3,
+  hill: 2,
+  flame: 2,
+  column: 2,
   nave: 1,
   barricade: 1,
   highwood: 1,
@@ -32,27 +32,58 @@ export function tileVariantName(id: TerrainId, variant: number): string {
 }
 
 export function tileVariantSrc(id: TerrainId, variant: number): string {
-  return `/game/tiles/${tileVariantName(id, variant)}.png?v=16`;
+  return `/game/tiles/${tileVariantName(id, variant)}.png?v=39`;
 }
 const TILES = Object.keys(TILE_VARIANT_COUNT) as TerrainId[];
 const SPRITES: SpriteId[] = ["kael", "nira", "voss", "salazar", "malrec", "aldric", "soldier", "brigand", "captain", "sorcerer", "horror", "Asherah", "pikeman", "wardog", "troll", "familiar", "swamp-blue-calf", "ancient-golem"];
 
+const LOAD_POOL = 8;
+let loadActive = 0;
+const loadWait: (() => void)[] = [];
+
+function acquireLoad(): Promise<void> {
+  if (loadActive < LOAD_POOL) {
+    loadActive++;
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => loadWait.push(() => {
+    loadActive++;
+    resolve();
+  }));
+}
+
+function releaseLoad(): void {
+  loadActive--;
+  const next = loadWait.shift();
+  if (next) next();
+}
+
 function loadImage(src: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    const fail = () => reject(new Error(`Falha ao carregar ${src}`));
-    const t = window.setTimeout(fail, 8000);
-    img.onload = () => {
-      window.clearTimeout(t);
-      resolve(img);
-    };
-    img.onerror = () => {
-      window.clearTimeout(t);
-      fail();
-    };
-    img.src = src;
-  });
+  return acquireLoad().then(
+    () =>
+      new Promise<HTMLImageElement>((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        const fail = () => reject(new Error(`Falha ao carregar ${src}`));
+        const t = window.setTimeout(() => {
+          done();
+          fail();
+        }, 20000);
+        const done = () => {
+          window.clearTimeout(t);
+          releaseLoad();
+        };
+        img.onload = () => {
+          done();
+          resolve(img);
+        };
+        img.onerror = () => {
+          done();
+          fail();
+        };
+        img.src = src;
+      }),
+  );
 }
 
 // Sprites cut as a 12-frame idle rather than the 4-frame default — the heroes, the two
