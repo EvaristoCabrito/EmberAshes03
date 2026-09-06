@@ -148,6 +148,25 @@ export function latestSerialFor(id: string): number {
   return LATEST.get(id)?.serial ?? 0;
 }
 
+/** Every scenario that has at least one saved file, with how many files it has.
+ *
+ * The editor's picker is built from this. Without it the only way to reach a map saved
+ * to disk was to already know its id and type it into "Cenário alvo" — the files were
+ * there and the editor offered no way to find them. */
+export function savedScenarios(): { id: string; files: number; latest: number }[] {
+  const counts = new Map<string, number>();
+  for (const file of Object.values(MAP_MODULES)) {
+    if (!file || typeof file !== "object" || !file.draft?.id) continue;
+    counts.set(file.draft.id, (counts.get(file.draft.id) ?? 0) + 1);
+  }
+  return [...counts].map(([id, files]) => ({ id, files, latest: latestSerialFor(id) }));
+}
+
+/** The newest saved draft on disk for a scenario, or undefined when it has no file. */
+export function latestSavedDraft(id: string): MapDraft | undefined {
+  return LATEST.get(id)?.draft;
+}
+
 /** The campaign, with saved maps applied: a saved map whose id matches a shipped mission
  * replaces it, and one with a new id is appended as a new mission. */
 export const ALL_MISSIONS: Mission[] = (() => {

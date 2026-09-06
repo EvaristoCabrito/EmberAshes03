@@ -10,7 +10,7 @@ import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, CURE_DISEASE, CURES, DECORA
 import { BattleEngine } from "./engine";
 import { WorldMapScreen } from "./WorldMapScreen";
 import { DISPLAY_VERSION } from "./version";
-import { ALL_LOCATIONS, ALL_MISSIONS, LOCATION_SLOTS, draftToMission, latestSerialFor, locationFill, locationForMission, mapFileName, missionById, missionsForLocation, savedVersionsFor, serialLabel, slotsFor, type MapDraft, type DraftSpawn } from "./mapstore";
+import { ALL_LOCATIONS, ALL_MISSIONS, LOCATION_SLOTS, draftToMission, latestSerialFor, locationFill, locationForMission, mapFileName, missionById, missionsForLocation, latestSavedDraft, savedScenarios, savedVersionsFor, serialLabel, slotsFor, type MapDraft, type DraftSpawn } from "./mapstore";
 import {
   activeSave,
   emptySave,
@@ -1893,6 +1893,17 @@ function MapEditorScreen({
   const versions = versionStore[draft.id] ?? [];
   const repoFiles = savedVersionsFor(draft.id);
   const repoLatest = latestSerialFor(draft.id);
+  /** Every scenario the picker can open, from either store. Files on disk are the real
+   * saves — a map authored offline exists only there — so they lead; a scenario that
+   * lives only in this browser (no dev server when it was saved) still gets a row. */
+  const pickable = (() => {
+    const rows = savedScenarios().map((s) => ({ id: s.id, files: s.files, local: (versionStore[s.id] ?? []).length }));
+    const seen = new Set(rows.map((r) => r.id));
+    for (const [id, list] of Object.entries(versionStore)) {
+      if (!seen.has(id) && list.length > 0) rows.push({ id, files: 0, local: list.length });
+    }
+    return rows.sort((a, b) => byName(a.id, b.id));
+  })();
   const [slots, setSlots] = useState<Record<string, number>>(LOCATION_SLOTS);
 
   /** Declares how many missions a location is meant to hold, so the editor can show what
@@ -2359,23 +2370,34 @@ function MapEditorScreen({
               </option>
             ))}
           </select>
-          {Object.keys(versionStore).length > 0 && (
+          {pickable.length > 0 && (
             <select
               id="mapPick"
               className="flex-1 min-w-0 bg-bg border border-border rounded-md px-2 py-1.5"
               value=""
-              title="Abre a versão mais recente salva para esse cenário — a lista de versões abaixo deixa escolher outra"
+              title="Abre o save mais recente desse cenário — a lista de arquivos abaixo deixa escolher outro serial"
               onChange={(e) => {
-                const list = versionStore[e.target.value];
+                const id = e.target.value;
+                if (!id) return;
+                const fromDisk = latestSavedDraft(id);
+                if (fromDisk) {
+                  setDraft(fromDisk);
+                  setNote(`Aberto ${mapFileName(id, latestSerialFor(id))} — o save mais novo de "${id}".`);
+                  return;
+                }
+                const list = versionStore[id];
                 const latest = list?.[list.length - 1];
-                if (latest) setDraft(latest.draft);
+                if (latest) {
+                  setDraft(latest.draft);
+                  setNote(`Aberta v${serialLabel(latest.serial)} de "${id}" — só neste navegador, sem arquivo.`);
+                }
               }}
             >
-              <option value="">Abrir cenário com versões salvas…</option>
-              {Object.entries(versionStore).map(([id, list]) => (
-                <option key={id} value={id}>
-                  {id} ({list.length} versão{list.length === 1 ? "" : "ões"}
-                  {activeVersions[id] ? `, v${activeVersions[id]} ativa` : ""})
+              <option value="">Abrir mapa salvo…</option>
+              {pickable.map((row) => (
+                <option key={row.id} value={row.id}>
+                  {row.id} ({row.files > 0 ? `${row.files} arquivo${row.files === 1 ? "" : "s"}` : `${row.local} só no navegador`}
+                  {activeVersions[row.id] ? `, v${serialLabel(activeVersions[row.id])} ativa` : ""})
                 </option>
               ))}
             </select>
