@@ -12,7 +12,7 @@
  * `apply: "serve"` keeps the route out of deployed apps: it exists only while
  * `npm run dev` is running, which is the only time there is a repo to write to.
  */
-import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export const MAP_SAVE_ROUTE = "/__map-save";
@@ -75,6 +75,16 @@ function readBody(req, limitBytes) {
   });
 }
 
+/** Reads a JSON file back after writing it, so a save can be confirmed rather than assumed.
+ * Returns null if it cannot be read, which is itself worth reporting. */
+function readBack(file) {
+  try {
+    return JSON.parse(readFileSync(file, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
 export function mapSavePlugin() {
   return {
     name: "ember:map-save",
@@ -111,7 +121,9 @@ export function mapSavePlugin() {
                 if (list.length > 0) cleaned[locationId] = list;
               }
               writeFileSync(orderPath, JSON.stringify(cleaned, null, 2) + "\n", "utf8");
-              reply(200, { ok: true, file: ORDER_FILE, order: cleaned });
+              // Read it straight back off disk: the confirmation the editor shows is then
+              // proof the file exists and holds this, not a promise that a write was tried.
+              reply(200, { ok: true, file: ORDER_FILE, order: cleaned, onDisk: readBack(orderPath) });
               return;
             }
             if (isSlots) {
@@ -123,7 +135,7 @@ export function mapSavePlugin() {
                 if (Number.isFinite(n) && n > 0) cleaned[id] = n;
               }
               writeFileSync(slotsPath, JSON.stringify(cleaned, null, 2) + "\n", "utf8");
-              reply(200, { ok: true, file: SLOTS_FILE, slots: cleaned });
+              reply(200, { ok: true, file: SLOTS_FILE, slots: cleaned, onDisk: readBack(slotsPath) });
               return;
             }
             const draft = JSON.parse(raw);
@@ -134,8 +146,9 @@ export function mapSavePlugin() {
             mkdirSync(dir, { recursive: true });
             const serial = nextSerial(dir, draft.id);
             const file = `${draft.id}-${String(serial).padStart(3, "0")}.json`;
-            writeFileSync(join(dir, file), JSON.stringify({ serial, savedAt: Date.now(), draft }, null, 2) + "\n", "utf8");
-            reply(200, { ok: true, serial, file: `${MAPS_DIR}/${file}` });
+            const full = join(dir, file);
+            writeFileSync(full, JSON.stringify({ serial, savedAt: Date.now(), draft }, null, 2) + "\n", "utf8");
+            reply(200, { ok: true, serial, file: `${MAPS_DIR}/${file}`, bytes: statSync(full).size });
           })
           .catch((err) => reply(400, { ok: false, error: String(err?.message ?? err) }));
       });

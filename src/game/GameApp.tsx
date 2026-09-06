@@ -1829,6 +1829,9 @@ function MapEditorScreen({
   // a row used to leave the same sentence sitting there, indistinguishable from nothing
   // having happened.
   const [note, setNoteRaw] = useState<{ text: string; n: number } | null>(null);
+  /** The loud one: a full-width panel that stays until dismissed, for the answer to "did it
+   * actually save". The small note above it is for running commentary. */
+  const [bigNote, setBigNote] = useState<{ ok: boolean; title: string; lines: string[]; dump?: string } | null>(null);
   const noteSerial = useRef(0);
   const setNote = useCallback((text: string) => {
     noteSerial.current += 1;
@@ -1913,6 +1916,53 @@ function MapEditorScreen({
       setNote(`Sem servidor de dev — vagas não gravadas (${err instanceof Error ? err.message : String(err)}).`);
     }
   };
+  /** Writes the Locais configuration — which missions each location holds, in what order,
+   * and how many it is meant to hold — and confirms it by what came back off disk.
+   *
+   * The order and slot writes already happen as you click, but silently: without a dev
+   * server they fail and the change lives only on screen until the tab closes. This is the
+   * deliberate one, and it says out loud whether the files exist afterwards. */
+  const saveScenarios = async () => {
+    setBigNote(null);
+    const post = async (route: string, payload: unknown) => {
+      const res = await fetch(route, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const body = (await res.json()) as { ok?: boolean; error?: string; file?: string; onDisk?: unknown };
+      if (!res.ok || !body.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+      return body;
+    };
+    try {
+      const o = await post("/__map-order", order);
+      const sl = await post("/__map-slots", slots);
+      const locais = Object.keys((o.onDisk as Record<string, unknown>) ?? {}).length;
+      const vagas = Object.keys((sl.onDisk as Record<string, unknown>) ?? {}).length;
+      setBigNote({
+        ok: true,
+        title: "ESTÁ SALVO",
+        lines: [
+          `${o.file} — ${locais} ${locais === 1 ? "local" : "locais"} com ordem definida`,
+          `${sl.file} — ${vagas} ${vagas === 1 ? "local" : "locais"} com vagas definidas`,
+          "Confirmado relendo os arquivos do disco, não é só promessa.",
+        ],
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setBigNote({
+        ok: false,
+        title: "NÃO SALVOU",
+        lines: [
+          `Motivo: ${msg}`,
+          "Sem servidor de dev não há onde gravar — rodando pelo start.bat no PC, ou pelo Codespaces, funciona.",
+          "O texto abaixo é a sua configuração. Copie e guarde: cola numa conversa e eu gravo por você.",
+        ],
+        dump: JSON.stringify({ order, slots }, null, 2),
+      });
+    }
+  };
+
   const activeSerial = activeVersions[draft.id];
 
   const decoLookup = useMemo(() => {
@@ -2950,8 +3000,37 @@ function MapEditorScreen({
         {/* Pinned to the action bar rather than sitting up in the form: Salvar lives down
             here, and a confirmation printed a screen and a half above it reads as silence.
             Keyed on the serial so the same message re-renders when an action repeats. */}
+        {bigNote && (
+          <div
+            className={`rounded-lg border-4 px-4 py-4 ${bigNote.ok ? "border-emerald-400 bg-emerald-500/20" : "border-red-500 bg-red-500/20"}`}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <p className={`font-display text-3xl sm:text-4xl font-bold tracking-tight leading-none ${bigNote.ok ? "text-emerald-300" : "text-red-300"}`}>
+                {bigNote.title}
+              </p>
+              <button type="button" onClick={() => setBigNote(null)} className="text-2xl leading-none px-2 opacity-70" aria-label="Fechar">
+                ×
+              </button>
+            </div>
+            <ul className="mt-2 space-y-1">
+              {bigNote.lines.map((l, i) => (
+                <li key={i} className="text-base leading-snug">
+                  {l}
+                </li>
+              ))}
+            </ul>
+            {bigNote.dump && (
+              <textarea
+                readOnly
+                value={bigNote.dump}
+                onFocus={(e) => e.currentTarget.select()}
+                className="mt-3 w-full h-40 bg-bg border border-border rounded-md p-2 text-xs font-mono"
+              />
+            )}
+          </div>
+        )}
         {note && (
-          <p key={note.n} className="text-base leading-snug text-accent bg-accent/15 border-2 border-accent/60 rounded-md px-3 py-2.5">
+          <p key={note.n} className="text-lg leading-snug font-medium text-accent bg-accent/15 border-2 border-accent/60 rounded-md px-3 py-3">
             {note.text}
           </p>
         )}
@@ -2971,9 +3050,12 @@ function MapEditorScreen({
         >
           Testar
         </Button>
+        <Button size="lg" className="w-full" onClick={() => void saveScenarios()}>
+          SALVAR CENÁRIOS
+        </Button>
         <div className="flex gap-2">
           <Button variant="ghost" className="flex-1" onClick={() => void doSave()}>
-            Salvar
+            Salvar mapa
           </Button>
           <Button variant="ghost" className="flex-1" onClick={doExport}>
             Exportar
