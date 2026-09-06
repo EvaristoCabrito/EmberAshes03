@@ -210,10 +210,7 @@ don't scaffold from stale priors — and keep each contract:
    them, don't import `@/lib/db`, don't add migrations. **Never create
    `src/routes/auth/popup.tsx`**: the template Vite plugin already serves
    `/auth/popup` (`popup.server.ts`), and a React page there shows the app
-   inside the popup. Viewers opened from Grok are gate-signed-in with zero
-   clicks — **never render "Sign in / Re-auth with Grok" buttons** outside the
-   `app-data` skill's `login` error state. Wiring:
-   `.grok/references/data-and-auth.md`.
+   inside the popup. Wiring: `.grok/references/data-and-auth.md`.
 
 ---
 

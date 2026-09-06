@@ -13,7 +13,7 @@ import { appEnvPlugin } from "./scripts/app-env-plugin.mjs";
 // @ts-expect-error JS plugin alongside the TS vite config
 import { mapSavePlugin } from "./scripts/map-save-plugin.mjs";
 // @ts-expect-error JS plugin alongside the TS vite config
-import { musicPlugin } from "./scripts/music-plugin.mjs";
+// import { musicPlugin } from "./scripts/music-plugin.mjs";
 import { isMigrationFile } from "./scripts/migration-plan.mjs";
 
 /** The one version number. `package.json` is the source of truth; the title
@@ -175,9 +175,15 @@ export default defineConfig(({ command, isPreview }) => ({
     appEnvPlugin(),
     // Dev-only /__map-save: the Map Editor writes maps into src/game/maps/.
     mapSavePlugin(),
-    // Sweeps stray audio into public/game/music and rewrites the track manifest, so a file
+    // Sweeps stray audio into public/game/MUSIC and rewrites the track manifest, so a file
     // dropped anywhere in the repo shows up in the editor's Trilha list.
-    musicPlugin(),
+    //
+    // OFF while a preview that would not launch is being tracked down. This is the only
+    // code added since 0.265 — the last build known to launch — that runs at server start,
+    // so it is the first suspect. Nothing depends on it: src/game/music-manifest.json is
+    // committed and MUSIC_TRACKS reads that, so every track still lists in the editor.
+    // Re-enable by uncommenting this line and its import at the top.
+    // musicPlugin(),
     // PWA head + ?install=1 tutorial page; runs before Start/Nitro.
     grokPwaPlugin(),
     tailwindcss(),
