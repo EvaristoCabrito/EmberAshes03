@@ -21,7 +21,9 @@
       "vite/client",
       "node"
     ],
-    "baseUrl": ".",
+    // No baseUrl: TypeScript deprecated it and version 6 errors on it. Since 4.1 a paths
+    // mapping resolves against the directory holding this file, so "./src/*" means the same
+    // thing it always did and nothing about "@/..." imports changes.
     "paths": {
       "@/*": [
         "./src/*"
