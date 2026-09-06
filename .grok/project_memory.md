@@ -1,0 +1,11 @@
+- Game title is Ember (Brasa dropped). Hex turn-based tactical, Fire Emblem-like, Portuguese. [2026-09-04]
+- Custom in-house engine only — no Godot/Unity. Sprites must be engine-agnostic PNG + simple atlas. [2026-09-04]
+- Owner rule (AGENTS.project.md): never edit repo/game without explicit chat OK. New assets shown first; approval of art ≠ hook into combat. [2026-09-04]
+- Party names seen so far: Kael, Neera, Voss, Salazar. [2026-09-04]
+- Playtest freeze: EvaristoCabrito/emberashes02. Work repo: EvaristoCabrito/EmberAshes03. [2026-09-04]
+- Visual tone: dark gothic ruins, ash/gold (“Táticas em Cinzas”). [2026-09-04]
+- Title screen is frozen — do not touch title-bg or title UI. [2026-09-05]
+- Never delete or replace old tiles; new hex tiles only as extra palette entries. [2026-09-05]
+- Hex terrain is 2D top-down. Catalog sheets are style refs. Barricade is a decoration/prop, not a hex. [2026-09-05]
+- Art boot contract: exact filenames. Replace in place is safe; rename/drop breaks loadGameArt. TILE_VARIANT_COUNT must match disk. [2026-09-05]
+- Preview pulled EmberAshes03 0.265 (8618c24) into this sandbox [2026-09-05]. GitHub not updated from this session.
