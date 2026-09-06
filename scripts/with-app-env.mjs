@@ -20,7 +20,7 @@
  * `process.env`, which is why the merge has to happen before Vite starts.
  */
 import { spawn } from "node:child_process";
-import { readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { constants as osConstants } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -104,20 +104,58 @@ export function isMainModule(moduleUrl) {
   }
 }
 
+/**
+ * Resolve `command` to something `spawn` can actually launch.
+ *
+ * npm installs a local CLI into `node_modules/.bin` as an extension-less shell
+ * script plus a `.cmd`/`.ps1` shim. On POSIX the script itself is executable
+ * and `spawn("vite")` finds it on PATH; on Windows there is no literal `vite`
+ * file, only `vite.cmd`, so the same call throws ENOENT before Vite ever
+ * starts. Resolve the shim ourselves so both platforms launch the same binary.
+ * A path (`./tool`, `C:\\bin\\tool`) or anything not installed locally is
+ * handed to `spawn` untouched, so `node` and friends still come off PATH.
+ */
+export function resolveCommand(command, root, platform = process.platform) {
+  if (command.includes("/") || command.includes("\\")) return command;
+  const bin = join(root, "node_modules", ".bin", command);
+  const candidates = platform === "win32" ? [`${bin}.cmd`, `${bin}.exe`, bin] : [bin];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return command;
+}
+
+/**
+ * Quote an argv entry for `cmd.exe`, which splits the command line on spaces.
+ * Needed because the Windows branch below spawns through a shell, and the
+ * resolved shim path routinely sits under a folder with a space in its name
+ * (`C:\\Users\\...\\Meus Documentos\\...`).
+ */
+function quoteForShell(value) {
+  return /[\s"]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+}
+
 function main(argv) {
   const [command, ...args] = argv;
   if (!command) {
     console.error("usage: node scripts/with-app-env.mjs <command> [args…]");
     process.exit(2);
   }
-  const env = mergeAppEnv(readAppEnv(projectRoot()), process.env);
-  const child = spawn(command, args, { stdio: "inherit", env });
+  const root = projectRoot();
+  const env = mergeAppEnv(readAppEnv(root), process.env);
+  const file = resolveCommand(command, root);
+  // A `.cmd` shim is a batch file: node refuses to exec it directly, so on
+  // Windows the child goes through `cmd.exe` and every argument is quoted.
+  const shell = process.platform === "win32";
+  const child = shell
+    ? spawn(quoteForShell(file), args.map(quoteForShell), { stdio: "inherit", env, shell: true })
+    : spawn(file, args, { stdio: "inherit", env });
   // The dev server is long-running and is stopped by signalling this wrapper.
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
     process.on(signal, () => child.kill(signal));
   }
   child.on("error", (err) => {
-    console.error(`[with-app-env] failed to run ${command}:`, err?.message || err);
+    console.error(`[with-app-env] failed to run ${file}:`, err?.message || err);
     process.exit(127);
   });
   child.on("exit", (code, signal) => {

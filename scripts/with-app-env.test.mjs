@@ -11,6 +11,7 @@ import {
   parseAppEnv,
   projectRoot,
   readAppEnv,
+  resolveCommand,
 } from "./with-app-env.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -125,4 +126,48 @@ test("the CLI still runs when invoked through a symlinked path", async () => {
     PRINT_FLAG,
   ]);
   assert.equal(stdout, "false");
+});
+
+/** A workspace whose `node_modules/.bin` holds exactly `files`. */
+function makeBinDir(files) {
+  const root = mkdtempSync(join(tmpdir(), "app-env-bin-"));
+  const bin = join(root, "node_modules", ".bin");
+  mkdirSync(bin, { recursive: true });
+  for (const file of files) writeFileSync(join(bin, file), "");
+  return root;
+}
+
+test("on Windows a local CLI resolves to its .cmd shim", () => {
+  // npm writes `vite.cmd` and no literal `vite`, so spawning the bare name
+  // there throws ENOENT before Vite ever starts — the whole point of this.
+  const root = makeBinDir(["vite", "vite.cmd", "vite.ps1"]);
+  assert.equal(
+    resolveCommand("vite", root, "win32"),
+    join(root, "node_modules", ".bin", "vite.cmd"),
+  );
+});
+
+test("on POSIX a local CLI resolves to the extension-less script", () => {
+  const root = makeBinDir(["vite"]);
+  assert.equal(resolveCommand("vite", root, "linux"), join(root, "node_modules", ".bin", "vite"));
+});
+
+test("a command that is not installed locally is left for PATH", () => {
+  const root = makeBinDir([]);
+  assert.equal(resolveCommand("node", root, "win32"), "node");
+  assert.equal(resolveCommand("node", root, "linux"), "node");
+});
+
+test("an explicit path is never rewritten", () => {
+  const root = makeBinDir(["vite", "vite.cmd"]);
+  assert.equal(resolveCommand("./vite", root, "linux"), "./vite");
+  assert.equal(resolveCommand("C:\\tools\\vite", root, "win32"), "C:\\tools\\vite");
+});
+
+test("a locally installed CLI actually runs through the wrapper", async () => {
+  // End to end: the resolved path must be launchable, not merely a string.
+  const { stdout } = await execFileAsync(process.execPath, [WRAPPER, "vite", "--version"], {
+    cwd: projectRoot(),
+  });
+  assert.match(stdout, /vite\/\d+\./);
 });

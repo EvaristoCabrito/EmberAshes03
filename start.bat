@@ -33,12 +33,22 @@ for /f "delims=" %%v in ('node --version') do echo Node: %%v >> "%LOG%"
 
 if not exist node_modules (
   echo.
-  echo   Primeira vez: baixando o que o jogo precisa.
-  echo   Isso leva de 3 a 5 minutos. NAO FECHE esta janela.
+  echo   ============================================
+  echo    PRIMEIRA VEZ - PRECISA DE INTERNET
+  echo   ============================================
+  echo.
+  echo   Baixando o que o jogo precisa. De 3 a 5 minutos.
+  echo   NAO FECHE esta janela.
+  echo.
+  echo   Depois desta vez o jogo roda SEM INTERNET,
+  echo   e esta parte nunca mais acontece.
   echo.
   echo --- npm install --- >> "%LOG%"
   powershell -NoProfile -Command "& { npm install 2>&1 | Tee-Object -FilePath '%LOG%' -Append }"
   if errorlevel 1 goto falhou
+) else (
+  echo   Ja instalado - rodando OFFLINE, sem internet. >> "%LOG%"
+  echo   Ja instalado. Nao precisa de internet.
 )
 
 echo --- npm run dev --- >> "%LOG%"

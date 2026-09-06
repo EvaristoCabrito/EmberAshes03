@@ -95,7 +95,7 @@
     "typescript-eslint": "^8.56.1",
     "vite": "^8.2.0"
   },
-  "version": "0.2666.0",
+  "version": "0.27.0",
   "description": "Ember \u2014 t\u00e1ticas em cinzas",
   "author": "Ember"
 }
