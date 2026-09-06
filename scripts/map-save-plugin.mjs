@@ -12,7 +12,7 @@
  * `apply: "serve"` keeps the route out of deployed apps: it exists only while
  * `npm run dev` is running, which is the only time there is a repo to write to.
  */
-import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export const MAP_SAVE_ROUTE = "/__map-save";
@@ -32,6 +32,10 @@ export const SLOTS_FILE = join("src", "game", "map-slots.json");
 
 /** Per-location mission order, same config-not-a-version treatment as the slot counts. */
 export const ORDER_FILE = join("src", "game", "map-order.json");
+
+/** Deletes one saved map file — the editor's way to throw away a version it created.
+ * Saves only ever stack up, so without this the folder is write-only. */
+export const MAP_DELETE_ROUTE = "/__map-delete";
 
 /** A scenario id is a file name, so it may only hold characters that are safe in one —
  * this is what stops a crafted id from writing outside the maps folder. */
@@ -55,6 +59,15 @@ export function nextSerial(dir, id) {
     if (match) highest = Math.max(highest, Number(match[1]));
   }
   return highest + 1;
+}
+
+/** A name this route is allowed to delete: exactly what a save writes — a safe id, a
+ * three-digit serial, `.json`. No path separators can survive it, so the name can never
+ * reach outside the maps folder, and README.md and anything hand-added is not matchable. */
+export function isSavedMapFile(name) {
+  if (typeof name !== "string") return false;
+  const match = /^([a-z0-9][a-z0-9-]*)-\d{3}\.json$/.exec(name);
+  return !!match && isSafeMapId(match[1]);
 }
 
 function readBody(req, limitBytes) {
@@ -98,7 +111,8 @@ export function mapSavePlugin() {
         const isMap = pathOnly === MAP_SAVE_ROUTE;
         const isSlots = pathOnly === SLOTS_SAVE_ROUTE;
         const isOrder = pathOnly === ORDER_SAVE_ROUTE;
-        if ((!isMap && !isSlots && !isOrder) || (req.method ?? "GET").toUpperCase() !== "POST") {
+        const isDelete = pathOnly === MAP_DELETE_ROUTE;
+        if ((!isMap && !isSlots && !isOrder && !isDelete) || (req.method ?? "GET").toUpperCase() !== "POST") {
           next();
           return;
         }
@@ -136,6 +150,22 @@ export function mapSavePlugin() {
               }
               writeFileSync(slotsPath, JSON.stringify(cleaned, null, 2) + "\n", "utf8");
               reply(200, { ok: true, file: SLOTS_FILE, slots: cleaned, onDisk: readBack(slotsPath) });
+              return;
+            }
+            if (isDelete) {
+              const name = JSON.parse(raw)?.file;
+              if (!isSavedMapFile(name)) {
+                reply(400, { ok: false, error: `nome de arquivo inválido: ${String(name)}` });
+                return;
+              }
+              const full = join(dir, name);
+              if (!existsSync(full)) {
+                reply(404, { ok: false, error: `${name} não existe` });
+                return;
+              }
+              unlinkSync(full);
+              // Same evidence rule as a save: check the disk rather than assume.
+              reply(200, { ok: true, file: `${MAPS_DIR}/${name}`, stillOnDisk: existsSync(full) });
               return;
             }
             const draft = JSON.parse(raw);

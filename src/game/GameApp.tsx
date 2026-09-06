@@ -1698,6 +1698,24 @@ async function saveMapToRepo(draft: MapDraft): Promise<{ ok: true; serial: numbe
   }
 }
 
+/** Deletes one saved map file through the dev server's /__map-delete route. Same
+ * constraint as saving: only reachable while `npm run dev` is running. */
+async function deleteMapFile(file: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const res = await fetch("/__map-delete", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ file }),
+    });
+    const body = (await res.json()) as { ok?: boolean; error?: string; stillOnDisk?: boolean };
+    if (!res.ok || !body.ok) return { ok: false, error: body.error ?? `HTTP ${res.status}` };
+    if (body.stillOnDisk) return { ok: false, error: "o arquivo continua no disco" };
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 function loadActiveVersions(): Record<string, number> {
   try {
     const raw = window.localStorage.getItem(MAP_ACTIVE_KEY);
@@ -1891,6 +1909,7 @@ function MapEditorScreen({
   };
 
   const versions = versionStore[draft.id] ?? [];
+  const [armedDelete, setArmedDelete] = useState("");
   const repoFiles = savedVersionsFor(draft.id);
   const repoLatest = latestSerialFor(draft.id);
   /** Every scenario the picker can open, from either store. Files on disk are the real
@@ -2256,6 +2275,33 @@ function MapEditorScreen({
     setActiveVersions(next);
     saveActiveVersions(next);
     setNote(`"${draft.id}" voltou a usar o cenário original.`);
+  };
+
+  /** Makes an older file the one the game loads. Serials only ever stack up, so instead
+   * of deleting the newer files this saves that draft again as the next serial — the
+   * rollback stays on disk and nothing is lost. */
+  const doActivateFile = async (f: { serial: number; draft: MapDraft }) => {
+    const repo = await saveMapToRepo(f.draft);
+    if (!repo.ok) {
+      setNote(`NÃO ATIVOU ${mapFileName(draft.id, f.serial)}: ${repo.error}`);
+      return;
+    }
+    setDraft(f.draft);
+    setNote(`${mapFileName(draft.id, f.serial)} virou ${repo.file.split("/").pop()} — é essa que o jogo carrega agora.`);
+  };
+
+  /** Deletes a saved file. Two clicks: the first arms the button, so a misclick on a
+   * row does not throw away a version that has no undo. */
+  const doDeleteFile = async (serial: number) => {
+    const name = mapFileName(draft.id, serial);
+    if (armedDelete !== name) {
+      setArmedDelete(name);
+      setNote(`Clique de novo no X pra apagar ${name} — isso não tem volta.`);
+      return;
+    }
+    setArmedDelete("");
+    const res = await deleteMapFile(name);
+    setNote(res.ok ? `${name} apagado.` : `NÃO APAGOU ${name}: ${res.error}`);
   };
 
   const doDeleteVersion = (serial: number) => {
@@ -2964,6 +3010,17 @@ function MapEditorScreen({
                     <Button size="sm" variant="quiet" onClick={() => setDraft(f.draft)}>
                       Carregar
                     </Button>
+                    <Button size="sm" variant="quiet" disabled={f.serial === repoLatest} onClick={() => void doActivateFile(f)}>
+                      Ativar
+                    </Button>
+                    <button
+                      type="button"
+                      onClick={() => void doDeleteFile(f.serial)}
+                      className={`px-1 ${armedDelete === mapFileName(draft.id, f.serial) ? "text-danger font-bold" : "text-danger"}`}
+                      aria-label={`Apagar ${mapFileName(draft.id, f.serial)}`}
+                    >
+                      {armedDelete === mapFileName(draft.id, f.serial) ? "apagar?" : "✕"}
+                    </button>
                   </div>
                 ))}
             </div>
