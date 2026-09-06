@@ -2236,7 +2236,7 @@ function MapEditorScreen({
     const next = { ...activeVersions, [draft.id]: serial };
     setActiveVersions(next);
     saveActiveVersions(next);
-    setNote(`v${serial} agora é a versão valendo pra "${draft.id}" na campanha.`);
+    setNote(`v${serialLabel(serial)} agora é a versão valendo pra "${draft.id}" na campanha.`);
   };
 
   const doDeactivate = () => {
@@ -2254,7 +2254,7 @@ function MapEditorScreen({
     setVersionStore(next);
     saveVersionStore(next);
     if (activeVersions[draft.id] === serial) doDeactivate();
-    setNote(`v${serial} excluída.`);
+    setNote(`v${serialLabel(serial)} excluída.`);
   };
 
   // Every list the editor offers is sorted by what it shows, not by the order things were
@@ -2953,7 +2953,7 @@ function MapEditorScreen({
             Versões salvas de "{draft.id}" ({versions.length})
           </p>
           {versions.length === 0 ? (
-            <p className="text-xs text-muted">Nenhuma ainda — Salvar cria a v1.</p>
+            <p className="text-xs text-muted">Nenhuma ainda — Salvar cria a v{serialLabel(1)}.</p>
           ) : (
             <div className="flex flex-col gap-1">
               {versions
@@ -2961,7 +2961,7 @@ function MapEditorScreen({
                 .reverse()
                 .map((v) => (
                   <div key={v.serial} className="flex items-center gap-1.5 text-xs bg-bg border border-border rounded-md px-2 py-1.5">
-                    <span className={`font-bold tabular-nums ${activeSerial === v.serial ? "text-accent" : ""}`}>v{v.serial}</span>
+                    <span className={`font-bold tabular-nums ${activeSerial === v.serial ? "text-accent" : ""}`}>v{serialLabel(v.serial)}</span>
                     <span className="text-muted flex-1 min-w-0 truncate">
                       {new Date(v.savedAt).toLocaleString()}
                       {activeSerial === v.serial ? " · ativa na campanha" : ""}
