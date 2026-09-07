@@ -1489,6 +1489,10 @@ export function emberFromCompleted(completed: string[]): number {
 export const CURES: Record<HealId, { name: string; dice: number; faces: number; bonus: number; mul: number; range: number }> = {
   cureMinor: { name: "Cura Menor", dice: 1, faces: 6, bonus: 0, mul: 1.0, range: 1 },
   cureWounds: { name: "Cura Média", dice: 2, faces: 6, bonus: 0, mul: 1.6, range: 2 },
+  // Paladin tier 4: mechanically identical to the Healer's Cura Média (same dice/mul/range,
+  // "the same as Healer" per spec) — a distinct HealId so its tier-4 uses are its own pool,
+  // never shared with the Healer's tier-2 Cura Média.
+  cureLight: { name: "Cura Leve", dice: 2, faces: 6, bonus: 0, mul: 1.6, range: 2 },
 };
 
 export function rollDice(dice: number, faces: number, bonus: number, rng: () => number): number {
@@ -1676,6 +1680,124 @@ export function cleavePower(level: number): { dice: number; faces: number } {
 
 export function cleaveFormula(level: number): string {
   const p = cleavePower(level);
+  return `arma + ${diceFormula(p.dice, p.faces, 0)}`;
+}
+
+/** Archer tier 3: fires at several targets in one shot, each rolling weapon damage plus its
+ * own bonus die. Two targets from the tier's unlock at level 7, a third at level 11; the
+ * bonus die itself starts at level 8 and upgrades once at level 13 (replaces, doesn't stack —
+ * same convention as every other bonus die in this file). */
+export const MULTI_SHOT = {
+  name: "Tiro Múltiplo",
+  rangeBonus: 3,
+};
+
+export function multiShotTargets(level: number): number {
+  return level >= 11 ? 3 : 2;
+}
+
+export function multiShotPower(level: number): { dice: number; faces: number } {
+  if (level >= 13) return { dice: 2, faces: 4 };
+  if (level >= 8) return { dice: 1, faces: 4 };
+  return { dice: 0, faces: 0 };
+}
+
+export function multiShotFormula(level: number): string {
+  const p = multiShotPower(level);
+  return p.dice > 0 ? `arma + ${diceFormula(p.dice, p.faces, 0)} por alvo` : "arma por alvo";
+}
+
+/** Paladin tier 3: a passive, not a hotbar cast — checked once at the start of the paladin's
+ * own turn (see startOfTurnEffects). The first time they're at or below this HP fraction with
+ * a tier-3 use still banked, it auto-heals them for a % of RES and spends the use — the same
+ * tier-use accounting every other spell goes through, just spent automatically instead of by
+ * the player picking a target. */
+export const SECOND_WIND = {
+  name: "Fôlego Renovado",
+  badlyWoundedPct: 0.3,
+};
+
+export function secondWindPct(level: number): number {
+  if (level >= 13) return 0.75;
+  if (level >= 10) return 0.5;
+  return 0.25;
+}
+
+/** Paladin tier 5 / Heavy Knight tier 5: an instant, self-centered zone (cast like Sweep —
+ * no aim) lasting `duration` rounds. Aura of Protection cuts damage allies inside it take by
+ * `pct`; Intimidating Presence (same table, opposite side filter — "scales in the same way")
+ * raises damage enemies inside it take by `pct` instead. Levels below the spec's own floor
+ * (18) just get the floor row; there's nothing weaker to fall back to. */
+export function auraPower(level: number): { radius: number; pct: number; duration: number } {
+  if (level >= 30) return { radius: 3, pct: 0.35, duration: 4 };
+  if (level >= 28) return { radius: 3, pct: 0.3, duration: 4 };
+  if (level >= 26) return { radius: 3, pct: 0.25, duration: 4 };
+  if (level >= 24) return { radius: 2, pct: 0.25, duration: 4 };
+  if (level >= 22) return { radius: 2, pct: 0.25, duration: 3 };
+  if (level >= 20) return { radius: 2, pct: 0.2, duration: 3 };
+  return { radius: 1, pct: 0.2, duration: 3 };
+}
+
+export const AURA_OF_PROTECTION = { name: "Aura de Proteção" };
+export const INTIMIDATING_PRESENCE = { name: "Presença Intimidante" };
+
+/** Paladin tier 6: a holy line — aimed the same way as Piercing (click through a cell to set
+ * the direction), capped to `range` — that only ever hits `foe.side !== caster.side`, the one
+ * AoE in the game that can never clip an ally. Its bonus is a flat half-MAG term (unlike
+ * Cleave/Long Shot's pure dice bonus) added on top of a plain weapon hit — "weird +MAG bonus
+ * plus weapon DMG" per spec — layered on the same weaponBonusDice/Faces/Bonus mechanism, no
+ * new field needed. */
+export const DIVINE_WRATH = { name: "Ira Divina", range: 4 };
+
+export function divineWrathPower(level: number): { dice: number; faces: number } {
+  if (level >= 30) return { dice: 3, faces: 10 };
+  if (level >= 26) return { dice: 3, faces: 8 };
+  if (level >= 22) return { dice: 2, faces: 10 };
+  if (level >= 19) return { dice: 2, faces: 8 };
+  return { dice: 1, faces: 10 };
+}
+
+export function divineWrathFormula(level: number, mag: number): string {
+  const p = divineWrathPower(level);
+  return `arma + ${Math.floor(mag / 2)} + ${diceFormula(p.dice, p.faces, 0)}`;
+}
+
+/** Heavy Knight tier 4: only usable bare-handed/two-handed — no shield in the off hand (see
+ * offHandBlocked's sibling check at the cast site). Aimed like Cleave (click a neighbor to
+ * pick the starting direction of the arc), hitting `hexes` hexes of that arc — 1 growing to 4
+ * — each for weapon damage + a bonus die, and shoving every hit target back a fixed 2 hexes
+ * (knockBack run twice per target). */
+export const SHOULDER_SMASH = { name: "Investida de Ombro", knockback: 2 };
+
+export function shoulderSmashPower(level: number): { dice: number; faces: number; hexes: number } {
+  if (level >= 28) return { dice: 2, faces: 12, hexes: 4 };
+  if (level >= 24) return { dice: 2, faces: 10, hexes: 3 };
+  if (level >= 20) return { dice: 2, faces: 8, hexes: 2 };
+  if (level >= 16) return { dice: 1, faces: 10, hexes: 2 };
+  return { dice: 1, faces: 8, hexes: 1 };
+}
+
+export function shoulderSmashFormula(level: number): string {
+  const p = shoulderSmashPower(level);
+  return `arma + ${diceFormula(p.dice, p.faces, 0)}`;
+}
+
+/** Heavy Knight tier 6: same aimed line as Divine Wrath ("similar to Divine Wrath" per spec),
+ * capped to `range` — but never filtered by side, so it runs through allies caught in the
+ * line too ("causes ally dmg", the one thing that tells it apart from Divine Wrath). Pure
+ * weapon + dice, no MAG term — Heavy Knight's MAG stat is 0. */
+export const STAMPEDE = { name: "Debandada", range: 4 };
+
+export function stampedePower(level: number): { dice: number; faces: number } {
+  if (level >= 30) return { dice: 3, faces: 10 };
+  if (level >= 27) return { dice: 3, faces: 8 };
+  if (level >= 24) return { dice: 2, faces: 10 };
+  if (level >= 21) return { dice: 2, faces: 8 };
+  return { dice: 1, faces: 10 };
+}
+
+export function stampedeFormula(level: number): string {
+  const p = stampedePower(level);
   return `arma + ${diceFormula(p.dice, p.faces, 0)}`;
 }
 
@@ -1970,6 +2092,14 @@ export const SPELL_TIER: Partial<Record<SpellKind, SpellTier>> = {
   fireball: 3,
   cureDisease: 3,
   causticVenom: 4,
+  multiShot: 3,
+  secondWind: 3,
+  cureLight: 4,
+  auraOfProtection: 5,
+  divineWrath: 6,
+  shoulderSmash: 4,
+  intimidatingPresence: 5,
+  stampede: 6,
 };
 
 export function spellTier(kind: SpellKind): SpellTier | null {

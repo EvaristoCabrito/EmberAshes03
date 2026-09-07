@@ -6,7 +6,7 @@ import { installAudioUnlock, playFile, playMenuMusic, playTheme, resumeAudio, se
 import { BattleCanvas } from "./BattleCanvas";
 import { InnScreen } from "./InnScreen";
 import { BackpackScreen, PaperDollScreen } from "./InventoryScreens";
-import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, cleaveFormula, CURE_DISEASE, CURES, DECORATIONS, DOUBLE_STRIKE, doubleStrikeFormula, EQUIPMENT, EXP_TO_LEVEL, FIREBALL, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, longShotFormula, MAGIC_MISSILE, PIERCING, piercingMul, PIERCING_THRUST, MAX_LEVEL, POTIONS, POTION_LOOT_WEIGHT, PROMOTE_LEVEL, PROMOTED_BASE, PROMOTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, TERRAIN, WEAPONS, WEAPON_MAX_ENH, WEB_OF_DREAMS, BAG_MAX, LOCKPICK_PRICE, POTION_CARRY_MAX, POTION_PRICE, barricadeDecor, decorationCells, placedFootprint, decorationImage, diceFormula, emberForKill, enemyLevelFor, equippedPouchId, fireballFormula, healFormula, lightningFormula, dressMap, isSummonClass, MUSIC_TRACKS, SUMMON_CLASSES, parseLayout, potionLabel, pouchIcon, rangeLabel, sheetLine, spellFormula, spellTier, startingBags, statsFor, terrainNote, tierKey, tierUses, weaponEnhCost, weaponSellValue, type SpellTier } from "./data";
+import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, cleaveFormula, CURE_DISEASE, CURES, DECORATIONS, DOUBLE_STRIKE, doubleStrikeFormula, EQUIPMENT, EXP_TO_LEVEL, FIREBALL, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, longShotFormula, MAGIC_MISSILE, PIERCING, piercingMul, PIERCING_THRUST, MAX_LEVEL, POTIONS, POTION_LOOT_WEIGHT, PROMOTE_LEVEL, PROMOTED_BASE, PROMOTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, TERRAIN, WEAPONS, WEAPON_MAX_ENH, WEB_OF_DREAMS, BAG_MAX, LOCKPICK_PRICE, POTION_CARRY_MAX, POTION_PRICE, barricadeDecor, decorationCells, placedFootprint, decorationImage, diceFormula, emberForKill, enemyLevelFor, equippedPouchId, fireballFormula, healFormula, lightningFormula, dressMap, isSummonClass, MUSIC_TRACKS, SUMMON_CLASSES, parseLayout, potionLabel, pouchIcon, rangeLabel, sheetLine, spellFormula, spellTier, startingBags, statsFor, terrainNote, tierKey, tierUses, weaponEnhCost, weaponSellValue, MULTI_SHOT, multiShotFormula, SECOND_WIND, secondWindPct, auraPower, AURA_OF_PROTECTION, INTIMIDATING_PRESENCE, DIVINE_WRATH, divineWrathPower, SHOULDER_SMASH, shoulderSmashFormula, STAMPEDE, stampedeFormula, type SpellTier } from "./data";
 import { BattleEngine } from "./engine";
 import { WorldMapScreen } from "./WorldMapScreen";
 import { DISPLAY_VERSION } from "./version";
@@ -131,27 +131,40 @@ const TEST_EMBER = 900000;
 const ALL_POTIONS: PotionId[] = ["weak", "mid", "potent", "disease", "manaSmall", "manaMid", "manaLarge"];
 const HOTBAR_KEY = "ember-hotbar-v1";
 
+// Prestige-only spells a promoted class adds on top of whatever its base class already
+// granted (see classSpells below) — hybrid, nothing lost at PROMOTE_LEVEL. Second Wind isn't
+// here: it's a passive the engine triggers itself from startOfTurnEffects (see SECOND_WIND in
+// data.ts), never a hotbar cast — it still spends a tier-3 use through the same accounting,
+// just automatically instead of by the player picking a slot.
+const PRESTIGE_SPELLS: Partial<Record<ClassId, SpellKind[]>> = {
+  paladin: ["cureLight", "auraOfProtection", "divineWrath"],
+  heavyKnight: ["shoulderSmash", "intimidatingPresence", "stampede"],
+};
+
 function classSpells(classId: ClassId): SpellKind[] {
   // Promoted classes keep everything the base class already granted (hybrid, nothing
-  // lost at PROMOTE_LEVEL) — prestige-only spells get their own case here once designed.
-  switch (PROMOTED_BASE[classId] ?? classId) {
-    case "swordsman":
-      return ["doubleStrike", "cleave"];
-    case "mage":
-      return ["magicMissile", "lightning", "fireball", "causticVenom"];
-    case "conjurer":
-      // Phantasmal Force / Summon Swarm (tiers 3-4) join this list as they're built — see
-      // SPELL_TIER for the intended tier assignment.
-      return ["summonFamiliar", "webOfDreams"];
-    case "archer":
-      return ["longShot", "piercing"];
-    case "healer":
-      return ["cureMinor", "cureWounds", "cureDisease"];
-    case "lancer":
-      return ["piercingThrust", "sweep", "trip"];
-    default:
-      return [];
-  }
+  // lost at PROMOTE_LEVEL), plus their own prestige-only spells from PRESTIGE_SPELLS.
+  const base = ((): SpellKind[] => {
+    switch (PROMOTED_BASE[classId] ?? classId) {
+      case "swordsman":
+        return ["doubleStrike", "cleave"];
+      case "mage":
+        return ["magicMissile", "lightning", "fireball", "causticVenom"];
+      case "conjurer":
+        // Phantasmal Force / Summon Swarm (tiers 3-4) join this list as they're built — see
+        // SPELL_TIER for the intended tier assignment.
+        return ["summonFamiliar", "webOfDreams"];
+      case "archer":
+        return ["longShot", "piercing", "multiShot"];
+      case "healer":
+        return ["cureMinor", "cureWounds", "cureDisease"];
+      case "lancer":
+        return ["piercingThrust", "sweep", "trip"];
+      default:
+        return [];
+    }
+  })();
+  return [...base, ...(PRESTIGE_SPELLS[classId] ?? [])];
 }
 
 function defaultSlots(classId: ClassId): (SlotAction | null)[] {
@@ -216,6 +229,24 @@ function slotIcon(action: SlotAction): string {
       return "/game/icons/summon-familiar.png?v=ds2";
     case "webOfDreams":
       return "/game/icons/web-of-dreams.png?v=ds2";
+    // No dedicated art exists yet for any of these — each reuses an existing icon whose
+    // theme is closest (a zone effect, a big melee AOE, a holy/arcane burst). secondWind is
+    // never actually shown (see PRESTIGE_SPELLS) but the switch must stay exhaustive.
+    case "multiShot":
+      return "/game/icons/long-shot.png?v=ds2";
+    case "secondWind":
+    case "cureLight":
+      return "/game/icons/cure-wounds.png?v=ds2";
+    case "auraOfProtection":
+      return "/game/icons/web-of-dreams.png?v=ds2";
+    case "intimidatingPresence":
+      return "/game/icons/caustic-venom.png?v=ds2";
+    case "divineWrath":
+      return "/game/icons/fireball.png?v=ds2";
+    case "shoulderSmash":
+      return "/game/icons/cleave.png?v=ds2";
+    case "stampede":
+      return "/game/icons/cleave-crossed-blades.png?v=ds2";
   }
 }
 
@@ -254,6 +285,22 @@ function slotLabel(action: SlotAction): string {
       return SUMMON_FAMILIAR.name;
     case "webOfDreams":
       return WEB_OF_DREAMS.name;
+    case "multiShot":
+      return MULTI_SHOT.name;
+    case "secondWind":
+      return SECOND_WIND.name;
+    case "cureLight":
+      return CURES.cureLight.name;
+    case "auraOfProtection":
+      return AURA_OF_PROTECTION.name;
+    case "intimidatingPresence":
+      return INTIMIDATING_PRESENCE.name;
+    case "divineWrath":
+      return DIVINE_WRATH.name;
+    case "shoulderSmash":
+      return SHOULDER_SMASH.name;
+    case "stampede":
+      return STAMPEDE.name;
   }
 }
 
@@ -1271,6 +1318,14 @@ const SKILL_CLASS: Partial<Record<SpellKind, ClassId>> = {
   piercingThrust: "lancer",
   sweep: "lancer",
   trip: "lancer",
+  multiShot: "archer",
+  secondWind: "paladin",
+  cureLight: "paladin",
+  auraOfProtection: "paladin",
+  divineWrath: "paladin",
+  shoulderSmash: "heavyKnight",
+  intimidatingPresence: "heavyKnight",
+  stampede: "heavyKnight",
 };
 
 const SKILL_DAMAGE_ROWS: { name: string; cls: ClassId; tier: SpellTier; formula: string | ((x: number) => string); param?: "level"; note: string }[] = [
@@ -1342,6 +1397,72 @@ const SKILL_DAMAGE_ROWS: { name: string; cls: ClassId; tier: SpellTier; formula:
     formula: (mag: number) =>
       `centro ${spellFormula(mag, CAUSTIC_VENOM.centerMul, CAUSTIC_VENOM.centerDice, CAUSTIC_VENOM.centerFaces, CAUSTIC_VENOM.centerBonus)} · respingo ${spellFormula(mag, CAUSTIC_VENOM.splashMul, CAUSTIC_VENOM.splashDice, CAUSTIC_VENOM.splashFaces, CAUSTIC_VENOM.splashBonus)}`,
     note: `Envenena: 1D4 no início de cada turno do alvo, até curado. Área de raio ${CAUSTIC_VENOM.size}, pega os dois lados.`,
+  },
+  {
+    name: MULTI_SHOT.name,
+    cls: SKILL_CLASS.multiShot!,
+    tier: spellTier("multiShot")!,
+    formula: (level: number) => multiShotFormula(level),
+    param: "level" as const,
+    note: `2 alvos (3 no nível 11), alcance arma+${MULTI_SHOT.rangeBonus}. Dado sobe no nível 8 e 13.`,
+  },
+  {
+    name: SECOND_WIND.name,
+    cls: SKILL_CLASS.secondWind!,
+    tier: spellTier("secondWind")!,
+    formula: (level: number) => `${Math.round(secondWindPct(level) * 100)}% de RES`,
+    param: "level" as const,
+    note: `Passiva: cura sozinho ao cair a ${Math.round(SECOND_WIND.badlyWoundedPct * 100)}% de HP ou menos. Não é um golpe do atalho.`,
+  },
+  { name: CURES.cureLight.name, cls: SKILL_CLASS.cureLight!, tier: spellTier("cureLight")!, formula: (mag: number) => `${healFormula(mag, "cureLight")} (cura)`, note: "Igual à Cura Média da Clériga, usos próprios do Paladino." },
+  {
+    name: AURA_OF_PROTECTION.name,
+    cls: SKILL_CLASS.auraOfProtection!,
+    tier: spellTier("auraOfProtection")!,
+    formula: (level: number) => {
+      const p = auraPower(level);
+      return `raio ${p.radius}, −${Math.round(p.pct * 100)}% dano, ${p.duration} rodadas`;
+    },
+    param: "level" as const,
+    note: "Instantânea, centrada em si mesmo — sem mira. Escala nos níveis 20, 22, 24, 26, 28 e 30.",
+  },
+  {
+    name: DIVINE_WRATH.name,
+    cls: SKILL_CLASS.divineWrath!,
+    tier: spellTier("divineWrath")!,
+    formula: (level: number) => {
+      const p = divineWrathPower(level);
+      return `arma + MAG/2 + ${diceFormula(p.dice, p.faces, 0)}`;
+    },
+    param: "level" as const,
+    note: `Linha reta mirada, alcance ${DIVINE_WRATH.range} — nunca atinge aliados. Dado sobe nos níveis 19, 22, 26 e 30.`,
+  },
+  {
+    name: SHOULDER_SMASH.name,
+    cls: SKILL_CLASS.shoulderSmash!,
+    tier: spellTier("shoulderSmash")!,
+    formula: (level: number) => shoulderSmashFormula(level),
+    param: "level" as const,
+    note: `Requer sem escudo. Arco de hexes cresce até 4; empurra ${SHOULDER_SMASH.knockback} hexes.`,
+  },
+  {
+    name: INTIMIDATING_PRESENCE.name,
+    cls: SKILL_CLASS.intimidatingPresence!,
+    tier: spellTier("intimidatingPresence")!,
+    formula: (level: number) => {
+      const p = auraPower(level);
+      return `raio ${p.radius}, +${Math.round(p.pct * 100)}% dano, ${p.duration} rodadas`;
+    },
+    param: "level" as const,
+    note: "Instantânea, centrada em si mesmo — o oposto da Aura de Proteção, mesma escala.",
+  },
+  {
+    name: STAMPEDE.name,
+    cls: SKILL_CLASS.stampede!,
+    tier: spellTier("stampede")!,
+    formula: (level: number) => stampedeFormula(level),
+    param: "level" as const,
+    note: `Linha reta mirada, alcance ${STAMPEDE.range} — atinge aliados também. Dado sobe nos níveis 21, 24, 27 e 30.`,
   },
 ].sort((a, b) => a.tier - b.tier);
 
@@ -3641,6 +3762,30 @@ function BattleScreen({
         break;
       case "webOfDreams":
         engine.startWebOfDreams();
+        break;
+      case "multiShot":
+        engine.startMultiShot();
+        break;
+      case "cureLight":
+        engine.startCure("cureLight");
+        break;
+      case "auraOfProtection":
+        engine.startAuraOfProtection();
+        break;
+      case "divineWrath":
+        engine.startDivineWrath();
+        break;
+      case "shoulderSmash":
+        engine.startShoulderSmash();
+        break;
+      case "intimidatingPresence":
+        engine.startIntimidatingPresence();
+        break;
+      case "stampede":
+        engine.startStampede();
+        break;
+      case "secondWind":
+        // Passive — never reaches the hotbar (see PRESTIGE_SPELLS); nothing to run.
         break;
     }
   }

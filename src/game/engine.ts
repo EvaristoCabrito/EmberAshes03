@@ -1,4 +1,4 @@
-import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, cleaveFormula, cleavePower, CURE_DISEASE, CURES, DECORATIONS, DISEASE, DOUBLE_STRIKE, doubleStrikeFormula, doubleStrikePower, EMPTY_BAG, EQUIPMENT, EXP_TO_LEVEL, expForHit, FIREBALL, FOOTPRINT_TYPE_7, FOOTPRINT_TYPE_8, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, longShotFormula, longShotPower, MAGIC_MISSILE, magicMissileCount, MAX_LEVEL, PIERCING, piercingMul, PIERCING_THRUST, POTION_CARRY_MAX, POTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, WEAPON_MAX_ENH, WEAPONS, WEB_OF_DREAMS, healFormula, barricadeDecor, decorationCells, decorationFacing, decorationImage, diceFormula, effectiveMaxRange, enemyLevelFor, fireballFormula, fireballOrigin, fireballPower, fireballRangeTiles, fireballTiles, hexAreaTiles, isProjectile, isSummonClass, lightningDice, lightningFormula, missionGearLevel, parseLayout, placedFootprint, potionLabel, rollCure, rollDice, rollPotion, spellFormula, spellTier, starterWeaponFor, STARTING_BAG, statsFor, terrainNote, TERRAIN, tierKey, tierUses, gearStatBonus, offHandBlocked, weaponRoll, weightedLootPick, weightedPotionPick, weightedWeaponPick } from "./data";
+import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, cleaveFormula, cleavePower, CURE_DISEASE, CURES, DECORATIONS, DISEASE, DOUBLE_STRIKE, doubleStrikeFormula, doubleStrikePower, EMPTY_BAG, EQUIPMENT, EXP_TO_LEVEL, expForHit, FIREBALL, FOOTPRINT_TYPE_7, FOOTPRINT_TYPE_8, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, longShotFormula, longShotPower, MAGIC_MISSILE, magicMissileCount, MAX_LEVEL, PIERCING, piercingMul, PIERCING_THRUST, POTION_CARRY_MAX, POTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, WEAPON_MAX_ENH, WEAPONS, WEB_OF_DREAMS, healFormula, barricadeDecor, decorationCells, decorationFacing, decorationImage, diceFormula, effectiveMaxRange, enemyLevelFor, fireballFormula, fireballOrigin, fireballPower, fireballRangeTiles, fireballTiles, hexAreaTiles, isProjectile, isSummonClass, lightningDice, lightningFormula, missionGearLevel, parseLayout, placedFootprint, potionLabel, rollCure, rollDice, rollPotion, spellFormula, spellTier, starterWeaponFor, STARTING_BAG, statsFor, terrainNote, TERRAIN, tierKey, tierUses, gearStatBonus, offHandBlocked, weaponRoll, weightedLootPick, weightedPotionPick, weightedWeaponPick, MULTI_SHOT, multiShotFormula, multiShotPower, multiShotTargets, SECOND_WIND, secondWindPct, auraPower, AURA_OF_PROTECTION, INTIMIDATING_PRESENCE, DIVINE_WRATH, divineWrathFormula, divineWrathPower, SHOULDER_SMASH, shoulderSmashFormula, shoulderSmashPower, STAMPEDE, stampedeFormula, stampedePower } from "./data";
 import type { SpellTier } from "./data";
 import { canCounter, makeForecast, mulberry32, powerOf, protOf, rollDamage, rollDamageCustom } from "./combat";
 import {
@@ -423,6 +423,11 @@ export class BattleEngine {
   /** Active Web of Dreams patches (Conjurer tier 2) — cast, not terrain, so they live here
    * rather than on the map. Ticks down by one every startNewRound and is dropped at 0. */
   webZones: { cells: Set<string>; roundsLeft: number }[] = [];
+  /** Active Aura of Protection / Intimidating Presence zones (Paladin/Heavy Knight tier 5) —
+   * same fixed-cells-at-cast-time, ticks-down-every-round shape as webZones. "protection"
+   * cuts damage taken by units on the caster's own side standing in the zone; "intimidation"
+   * raises damage taken by units on the OTHER side — see zoneDamageMul. */
+  auraZones: { cells: Set<string>; roundsLeft: number; kind: "protection" | "intimidation"; side: Unit["side"]; pct: number }[] = [];
   /** Whether the unit whose turn is currently active was standing in a web zone at the
    * START of that turn — decided once in beginUnitTurn and left alone for the rest of it
    * (see effectiveUnitForReach). */
@@ -996,6 +1001,7 @@ export class BattleEngine {
           target.asleep = false;
           target.sleepTurns = 0;
         }
+        hit.dmg = Math.max(1, Math.round(hit.dmg * this.zoneDamageMul(target)));
         target.hp = Math.max(0, target.hp - hit.dmg);
         target.flash = 1;
         this.provoke(target, actor);
@@ -1159,6 +1165,7 @@ export class BattleEngine {
           foe.asleep = false;
           foe.sleepTurns = 0;
         }
+        dmg = Math.max(1, Math.round(dmg * this.zoneDamageMul(foe)));
         foe.hp = Math.max(0, foe.hp - dmg);
         foe.flash = 1;
         this.provoke(foe, att);
@@ -1178,7 +1185,10 @@ export class BattleEngine {
             a.spellKind === "piercing" ||
             a.spellKind === "causticVenom" ||
             a.spellKind === "piercingThrust" ||
-            a.spellKind === "sweep";
+            a.spellKind === "sweep" ||
+            a.spellKind === "divineWrath" ||
+            a.spellKind === "shoulderSmash" ||
+            a.spellKind === "stampede";
           const xpMul =
             foe.hp <= 0 && !isAoeSpell && (att.classId === "mage" || att.classId === "conjurer" || a.spellKind === "longShot")
               ? 2
@@ -1196,6 +1206,9 @@ export class BattleEngine {
           sfxPlay.hit();
           if (a.echo) foe.shock = { ...a.echo };
           if (a.spellKind === "sweep") this.knockBack(att, foe);
+          if (a.spellKind === "shoulderSmash") {
+            for (let i = 0; i < SHOULDER_SMASH.knockback; i++) this.knockBack(att, foe);
+          }
         }
       }
       if (!this.reducedMotion) this.trauma = Math.min(1, this.trauma + 0.45);
@@ -1554,6 +1567,34 @@ export class BattleEngine {
       sfxPlay.hit();
       if (u.hp <= 0) {
         this.markDead(u);
+      }
+    }
+    // Second Wind (Paladin tier 3): passive, never a hotbar cast — the first time this
+    // paladin's own turn opens at or below the "badly wounded" line with a tier-3 use still
+    // banked, it heals itself and spends the use. classId-gated explicitly, since tierUses
+    // hands out tier-3 slots to every class, not just paladin.
+    if (u.alive && u.classId === "paladin" && u.hp / u.maxHp <= SECOND_WIND.badlyWoundedPct && this.tierRemaining(u, "secondWind") > 0) {
+      this.spendTier(u, "secondWind");
+      const heal = Math.min(u.maxHp - u.hp, Math.round(secondWindPct(u.level) * u.res));
+      if (heal > 0) {
+        u.hp += heal;
+        u.flash = 1;
+        this.emitParticle({
+          x: u.drawX,
+          y: u.drawY - 0.35,
+          vx: 0,
+          vy: -0.18,
+          life: 0,
+          max: 2,
+          size: 1,
+          color: "#d8ead2",
+          text: `+${heal}`,
+          kind: "text",
+          frame: 0,
+        });
+        this.tip = `${SECOND_WIND.name} · +${heal} HP`;
+        this.pushLog(`${u.name} usa ${SECOND_WIND.name}: +${heal} HP`);
+        sfxPlay.heal();
       }
     }
     if (u.alive) this.applyTileHazard(u, { x: u.x, y: u.y });
@@ -2030,6 +2071,97 @@ export class BattleEngine {
     sfxPlay.ui();
   }
 
+  startMultiShot(): void {
+    const u = this.units.find((x) => x.id === this.selectedId);
+    if (!u || u.acted || this.tierRemaining(u, "multiShot") <= 0) return;
+    this.mode = "awaitSpell";
+    this.spellKind = "multiShot";
+    this.spellArmed = false;
+    this.spellAim = null;
+    this.hover = null;
+    const want = multiShotTargets(u.level);
+    this.tip = `${MULTI_SHOT.name}: ${multiShotFormula(u.level)}, alcance arma+${MULTI_SHOT.rangeBonus}. Escolha ${want} alvos (pode repetir).`;
+    sfxPlay.ui();
+  }
+
+  /** Aura of Protection (Paladin tier 5) / Intimidating Presence (Heavy Knight tier 5): both
+   * instant and self-centered, same as Sweep — no aim, no confirmSpell branch needed. */
+  startAuraOfProtection(): void {
+    const u = this.units.find((x) => x.id === this.selectedId);
+    if (!u || u.acted || this.tierRemaining(u, "auraOfProtection") <= 0) return;
+    const p = auraPower(u.level);
+    const cells = new Set(hexAreaTiles({ x: u.x, y: u.y }, p.radius, this.cols, this.rows).map((c) => key(c.x, c.y)));
+    this.auraZones.push({ cells, roundsLeft: p.duration, kind: "protection", side: u.side, pct: p.pct });
+    this.spendTier(u, "auraOfProtection");
+    this.spellKind = null;
+    this.spellArmed = false;
+    this.spellAim = null;
+    this.tip = `${AURA_OF_PROTECTION.name}: aliados a até ${p.radius} hexes tomam ${Math.round(p.pct * 100)}% menos dano por ${p.duration} rodadas.`;
+    this.mode = "locked";
+    this.queue.push({ type: "banner", text: AURA_OF_PROTECTION.name, dur: 1.1 });
+    sfxPlay.ui();
+  }
+
+  startIntimidatingPresence(): void {
+    const u = this.units.find((x) => x.id === this.selectedId);
+    if (!u || u.acted || this.tierRemaining(u, "intimidatingPresence") <= 0) return;
+    const p = auraPower(u.level);
+    const cells = new Set(hexAreaTiles({ x: u.x, y: u.y }, p.radius, this.cols, this.rows).map((c) => key(c.x, c.y)));
+    this.auraZones.push({ cells, roundsLeft: p.duration, kind: "intimidation", side: u.side, pct: p.pct });
+    this.spendTier(u, "intimidatingPresence");
+    this.spellKind = null;
+    this.spellArmed = false;
+    this.spellAim = null;
+    this.tip = `${INTIMIDATING_PRESENCE.name}: inimigos a até ${p.radius} hexes tomam ${Math.round(p.pct * 100)}% mais dano por ${p.duration} rodadas.`;
+    this.mode = "locked";
+    this.queue.push({ type: "banner", text: INTIMIDATING_PRESENCE.name, dur: 1.1 });
+    sfxPlay.ui();
+  }
+
+  startDivineWrath(): void {
+    const u = this.units.find((x) => x.id === this.selectedId);
+    if (!u || u.acted || this.tierRemaining(u, "divineWrath") <= 0) return;
+    this.mode = "awaitSpell";
+    this.spellKind = "divineWrath";
+    this.spellArmed = false;
+    this.spellAim = null;
+    this.hover = null;
+    this.tip = `${DIVINE_WRATH.name}: linha reta, ${divineWrathFormula(u.level, u.mag)}, nunca atinge aliados. Alcance ${DIVINE_WRATH.range}. Toque para mirar.`;
+    sfxPlay.ui();
+  }
+
+  /** Shoulder Smash (Heavy Knight tier 4): refuses to arm while a shield is equipped in the
+   * off hand — it's the bare-handed/two-handed version of a knightly charge. */
+  startShoulderSmash(): void {
+    const u = this.units.find((x) => x.id === this.selectedId);
+    if (!u || u.acted || this.tierRemaining(u, "shoulderSmash") <= 0) return;
+    if (u.offHandId && EQUIPMENT[u.offHandId]?.kind === "shield") {
+      this.tip = "Requer as duas mãos livres — sem escudo equipado.";
+      sfxPlay.ui();
+      return;
+    }
+    this.mode = "awaitSpell";
+    this.spellKind = "shoulderSmash";
+    this.spellArmed = false;
+    this.spellAim = null;
+    this.hover = null;
+    const p = shoulderSmashPower(u.level);
+    this.tip = `${SHOULDER_SMASH.name}: ${p.hexes} hexes adjacentes, ${shoulderSmashFormula(u.level)}, empurra ${SHOULDER_SMASH.knockback} hexes. Toque num hex vizinho.`;
+    sfxPlay.ui();
+  }
+
+  startStampede(): void {
+    const u = this.units.find((x) => x.id === this.selectedId);
+    if (!u || u.acted || this.tierRemaining(u, "stampede") <= 0) return;
+    this.mode = "awaitSpell";
+    this.spellKind = "stampede";
+    this.spellArmed = false;
+    this.spellAim = null;
+    this.hover = null;
+    this.tip = `${STAMPEDE.name}: linha reta, ${stampedeFormula(u.level)}, atinge todos na linha (aliados inclusos). Alcance ${STAMPEDE.range}. Toque para mirar.`;
+    sfxPlay.ui();
+  }
+
   confirmSpell(): void {
     const u = this.units.find((x) => x.id === this.selectedId);
     const cell = this.hover;
@@ -2086,7 +2218,26 @@ export class BattleEngine {
       this.castCureDisease(u, cell);
       return;
     }
-    if (this.spellKind === "sweep") return; // instant, resolved by startSweep — never reaches here
+    if (this.spellKind === "multiShot") {
+      this.castMultiShot(u, cell);
+      return;
+    }
+    if (this.spellKind === "divineWrath") {
+      this.castDivineWrath(u, cell);
+      return;
+    }
+    if (this.spellKind === "shoulderSmash") {
+      this.castShoulderSmash(u, cell);
+      return;
+    }
+    if (this.spellKind === "stampede") {
+      this.castStampede(u, cell);
+      return;
+    }
+    // instant, resolved directly by their own startX() — never reaches here
+    if (this.spellKind === "sweep" || this.spellKind === "auraOfProtection" || this.spellKind === "intimidatingPresence") return;
+    // secondWind is a passive triggered from startOfTurnEffects, never armed via a startX()
+    if (this.spellKind === "secondWind") return;
     this.castHeal(u, cell, this.spellKind);
   }
 
@@ -2122,7 +2273,7 @@ export class BattleEngine {
   }
 
   private isHeal(kind: SpellKind | null): kind is HealId {
-    return kind === "cureMinor" || kind === "cureWounds";
+    return kind === "cureMinor" || kind === "cureWounds" || kind === "cureLight";
   }
 
   private tierRemaining(u: Unit, kind: SpellKind): number {
@@ -2145,6 +2296,21 @@ export class BattleEngine {
   /** True while (x,y) sits inside any still-active Web of Dreams patch. */
   private isWebCell(x: number, y: number): boolean {
     return this.webZones.some((z) => z.cells.has(key(x, y)));
+  }
+
+  /** Combined multiplier from every active Aura of Protection / Intimidating Presence zone
+   * covering `defender`'s current cell — applied to the final damage of a hit right before it
+   * comes off their HP, same insertion point as the sleepBonusDamage multiplier. Protection
+   * only discounts a zone's own side; Intimidating Presence only surcharges the other side, so
+   * a unit standing in both a friendly and a hostile zone at once takes both at the same time. */
+  private zoneDamageMul(defender: Unit): number {
+    let mul = 1;
+    for (const z of this.auraZones) {
+      if (!z.cells.has(key(defender.x, defender.y))) continue;
+      if (z.kind === "protection" && z.side === defender.side) mul *= 1 - z.pct;
+      if (z.kind === "intimidation" && z.side !== defender.side) mul *= 1 + z.pct;
+    }
+    return mul;
   }
 
   /** Every reach computation for a player unit's own turn — including every re-derive free
@@ -2234,11 +2400,29 @@ export class BattleEngine {
       const here = occupancy(this.units).get(key(cell.x, cell.y));
       return !!here && here.alive && here.side !== caster.side && canHitFrom(caster, caster, here, this.tiles, this.cols);
     }
-    if (this.spellKind === "cleave") {
+    if (this.spellKind === "cleave" || this.spellKind === "shoulderSmash") {
       return hexNeighbors(caster.x, caster.y).some((p) => p.x === cell.x && p.y === cell.y);
     }
+    if (this.spellKind === "multiShot") {
+      const d = manhattan(caster, cell);
+      const here = occupancy(this.units).get(key(cell.x, cell.y));
+      if (!here || !attackableByPlayer(here) || d < caster.minRange || d > caster.maxRange + MULTI_SHOT.rangeBonus) return false;
+      return clearShot(caster, cell, this.tiles, this.cols, "arrow");
+    }
+    if (this.spellKind === "divineWrath") return this.wrathRay(caster, cell, DIVINE_WRATH.range) !== null;
+    if (this.spellKind === "stampede") return this.wrathRay(caster, cell, STAMPEDE.range) !== null;
     if (this.spellKind === "cureDisease") return this.validCureDiseaseTarget(caster, cell);
     return this.validHealTarget(caster, cell);
+  }
+
+  /** Divine Wrath / Stampede: the same directional-line traversal as Piercing (aimed by
+   * clicking through a cell to set the direction), just capped to their own range instead of
+   * running the length of the board. */
+  private wrathRay(caster: Unit, through: Point, range: number): Point[] | null {
+    const raw = this.piercingRay(caster, through);
+    if (!raw) return null;
+    const capped = raw.slice(0, range);
+    return capped.length ? capped : null;
   }
 
   private piercingRay(from: Point, through: Point): Point[] | null {
@@ -2523,6 +2707,50 @@ export class BattleEngine {
     }
   }
 
+  /** Archer tier 3: the same click-N-targets flow as Magic Missile (this.missileTargets),
+   * but each shot is a plain weapon hit plus a bonus die (weaponBonusDice) instead of a
+   * MAG-scaled spellDamage roll — Multi Shot is a volley of arrows, not a spell. */
+  private castMultiShot(unit: Unit, cell: Point): void {
+    if (!this.spellAimValid(unit, cell)) {
+      this.tip = "Alvo fora de alcance.";
+      sfxPlay.ui();
+      return;
+    }
+    const occ = occupancy(this.units);
+    const foe = occ.get(key(cell.x, cell.y));
+    if (!foe) return;
+
+    const want = multiShotTargets(unit.level);
+    this.missileTargets.push({ id: foe.id, cell: { x: cell.x, y: cell.y } });
+    if (this.missileTargets.length < want) {
+      const left = want - this.missileTargets.length;
+      this.tip = `${MULTI_SHOT.name} · escolha mais ${left} alvo${left > 1 ? "s" : ""} (pode repetir).`;
+      sfxPlay.ui();
+      return;
+    }
+
+    const shots = this.missileTargets;
+    this.missileTargets = [];
+    this.spendTier(unit, "multiShot");
+    this.spellKind = null;
+    this.tip = null;
+    this.mode = "locked";
+    const power = multiShotPower(unit.level);
+    for (const shot of shots) {
+      this.queue.push({
+        type: "spell",
+        att: unit.id,
+        tiles: [shot.cell],
+        ids: [shot.id],
+        label: MULTI_SHOT.name,
+        weaponBonusDice: power.dice,
+        weaponBonusFaces: power.faces,
+        weaponBonusBonus: 0,
+        spellKind: "multiShot",
+      });
+    }
+  }
+
   private castDoubleStrike(unit: Unit, cell: Point): void {
     if (!this.spellAimValid(unit, cell)) {
       this.tip = "Toque no inimigo.";
@@ -2730,6 +2958,124 @@ export class BattleEngine {
       weaponBonusFaces: power.faces,
       weaponBonusBonus: 0,
       spellKind: "cleave",
+    });
+  }
+
+  /** Paladin tier 6: a holy line down the aimed direction — the one AoE that filters allies
+   * OUT of `ids` rather than in, so it can never clip one. Bonus is a flat half-MAG term
+   * (weaponBonusBonus) plus a level-gated die, on top of a plain weapon hit. */
+  private castDivineWrath(unit: Unit, cell: Point): void {
+    if (!this.spellAimValid(unit, cell)) {
+      this.tip = "Alcance ou linha inválidos.";
+      sfxPlay.ui();
+      return;
+    }
+    const tiles = this.wrathRay(unit, cell, DIVINE_WRATH.range);
+    if (!tiles || tiles.length === 0) {
+      this.tip = "Alcance ou linha inválidos.";
+      sfxPlay.ui();
+      return;
+    }
+    const ids: string[] = [];
+    for (const t of tiles) {
+      const who = this.units.find((x) => x.alive && occupies(x, t.x, t.y));
+      if (who && who.id !== unit.id && who.side !== unit.side && !ids.includes(who.id)) ids.push(who.id);
+    }
+    this.spendTier(unit, "divineWrath");
+    this.spellKind = null;
+    this.missileTargets = [];
+    this.tip = null;
+    this.mode = "locked";
+    const power = divineWrathPower(unit.level);
+    this.queue.push({
+      type: "spell",
+      att: unit.id,
+      tiles,
+      ids,
+      label: DIVINE_WRATH.name,
+      weaponBonusDice: power.dice,
+      weaponBonusFaces: power.faces,
+      weaponBonusBonus: Math.floor(unit.mag / 2),
+      spellKind: "divineWrath",
+    });
+  }
+
+  /** Heavy Knight tier 4: an arc of `hexes` neighbors (same cleaveHexes traversal as Cleave),
+   * enemies only, each knocked back a fixed 2 hexes on top of the hit — see the
+   * a.spellKind === "shoulderSmash" knockback loop in stepSpell. Refuses to arm at all while
+   * a shield is equipped (see startShoulderSmash), so no equipment check needed here. */
+  private castShoulderSmash(unit: Unit, cell: Point): void {
+    if (!this.spellAimValid(unit, cell)) {
+      this.tip = "Toque num hex vizinho.";
+      sfxPlay.ui();
+      return;
+    }
+    const power = shoulderSmashPower(unit.level);
+    const tiles = cleaveHexes(unit, cell, power.hexes, this.cols, this.rows);
+    if (tiles.length === 0) {
+      this.tip = "Toque num hex vizinho.";
+      sfxPlay.ui();
+      return;
+    }
+    const ids: string[] = [];
+    for (const t of tiles) {
+      const who = this.units.find((x) => x.alive && occupies(x, t.x, t.y));
+      if (who && who.id !== unit.id && who.side !== unit.side && !ids.includes(who.id)) ids.push(who.id);
+    }
+    this.spendTier(unit, "shoulderSmash");
+    this.spellKind = null;
+    this.missileTargets = [];
+    this.tip = null;
+    this.mode = "locked";
+    this.queue.push({
+      type: "spell",
+      att: unit.id,
+      tiles,
+      ids,
+      label: SHOULDER_SMASH.name,
+      weaponBonusDice: power.dice,
+      weaponBonusFaces: power.faces,
+      weaponBonusBonus: 0,
+      spellKind: "shoulderSmash",
+    });
+  }
+
+  /** Heavy Knight tier 6: the same aimed line as Divine Wrath, but `ids` keeps EVERY unit in
+   * the line except the caster themselves — allies included — which is the one thing that
+   * tells it apart from Divine Wrath's ally-proof line. */
+  private castStampede(unit: Unit, cell: Point): void {
+    if (!this.spellAimValid(unit, cell)) {
+      this.tip = "Alcance ou linha inválidos.";
+      sfxPlay.ui();
+      return;
+    }
+    const tiles = this.wrathRay(unit, cell, STAMPEDE.range);
+    if (!tiles || tiles.length === 0) {
+      this.tip = "Alcance ou linha inválidos.";
+      sfxPlay.ui();
+      return;
+    }
+    const ids: string[] = [];
+    for (const t of tiles) {
+      const who = this.units.find((x) => x.alive && occupies(x, t.x, t.y));
+      if (who && who.id !== unit.id && !ids.includes(who.id)) ids.push(who.id);
+    }
+    this.spendTier(unit, "stampede");
+    this.spellKind = null;
+    this.missileTargets = [];
+    this.tip = null;
+    this.mode = "locked";
+    const power = stampedePower(unit.level);
+    this.queue.push({
+      type: "spell",
+      att: unit.id,
+      tiles,
+      ids,
+      label: STAMPEDE.name,
+      weaponBonusDice: power.dice,
+      weaponBonusFaces: power.faces,
+      weaponBonusBonus: 0,
+      spellKind: "stampede",
     });
   }
 
@@ -3084,6 +3430,8 @@ export class BattleEngine {
     }
     for (const z of this.webZones) z.roundsLeft -= 1;
     this.webZones = this.webZones.filter((z) => z.roundsLeft > 0);
+    for (const z of this.auraZones) z.roundsLeft -= 1;
+    this.auraZones = this.auraZones.filter((z) => z.roundsLeft > 0);
     // Neutrals are left out, so they never get a turn and the AI never runs for them. One
     // provoked mid-round isn't in this round's order either: it wakes up and acts from the
     // next round, which reads as the beast rousing rather than instantly retaliating.
@@ -3931,6 +4279,14 @@ export class BattleEngine {
       overlay(cells, "rgba(170,140,230,0.45)");
     }
 
+    for (const zone of this.auraZones) {
+      const cells = [...zone.cells].map((k) => {
+        const [x, y] = k.split(",").map(Number);
+        return { x: x!, y: y! };
+      });
+      overlay(cells, zone.kind === "protection" ? "rgba(150,210,255,0.3)" : "rgba(220,90,70,0.3)");
+    }
+
     if (this.mode === "idle" && this.threat.length) overlay(this.threat, "rgba(220,120,90,0.5)");
 
     if (this.mode === "awaitSpell") {
@@ -4004,6 +4360,25 @@ export class BattleEngine {
         overlay(this.healRangeTiles(selected, CURE_DISEASE.range), "rgba(150,210,170,0.45)");
         const cell = this.hover ?? this.spellAim;
         if (cell && this.validCureDiseaseTarget(selected, cell)) overlay([cell], "rgba(170,230,180,0.55)");
+      } else if (selected && this.spellKind === "multiShot") {
+        overlay(this.healRangeTiles(selected, selected.maxRange + MULTI_SHOT.rangeBonus), "rgba(210,190,90,0.45)");
+        const cell = this.hover ?? this.spellAim;
+        if (cell && this.spellAimValid(selected, cell)) overlay([cell], "rgba(230,200,100,0.55)");
+      } else if (selected && this.spellKind === "divineWrath") {
+        overlay(this.healRangeTiles(selected, DIVINE_WRATH.range), "rgba(255,225,140,0.4)");
+        const cell = this.hover ?? this.spellAim;
+        const line = cell ? this.wrathRay(selected, cell, DIVINE_WRATH.range) : null;
+        if (line) overlay(line, "rgba(255,225,140,0.6)");
+      } else if (selected && this.spellKind === "shoulderSmash") {
+        overlay(hexNeighbors(selected.x, selected.y), "rgba(220,120,80,0.45)");
+        const cell = this.hover ?? this.spellAim;
+        const arc = cell ? cleaveHexes(selected, cell, shoulderSmashPower(selected.level).hexes, this.cols, this.rows) : [];
+        if (arc.length) overlay(arc, "rgba(235,120,80,0.55)");
+      } else if (selected && this.spellKind === "stampede") {
+        overlay(this.healRangeTiles(selected, STAMPEDE.range), "rgba(200,90,60,0.4)");
+        const cell = this.hover ?? this.spellAim;
+        const line = cell ? this.wrathRay(selected, cell, STAMPEDE.range) : null;
+        if (line) overlay(line, "rgba(200,90,60,0.6)");
       }
     }
 

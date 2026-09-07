@@ -75,7 +75,7 @@ export type ClassId =
   // supplies a sprite/size/range fallback and satisfies the ClassId-keyed tables below.
   | "familiar";
 export type SpriteId = "kael" | "nira" | "voss" | "salazar" | "malrec" | "aldric" | "soldier" | "brigand" | "captain" | "sorcerer" | "horror" | "Asherah" | "pikeman" | "wardog" | "troll" | "familiar" | "swamp-blue-calf" | "ancient-golem";
-export type HealId = "cureMinor" | "cureWounds";
+export type HealId = "cureMinor" | "cureWounds" | "cureLight";
 export type SpellKind =
   | "fireball"
   | HealId
@@ -91,7 +91,14 @@ export type SpellKind =
   | "sweep"
   | "trip"
   | "summonFamiliar"
-  | "webOfDreams";
+  | "webOfDreams"
+  | "multiShot"
+  | "secondWind"
+  | "auraOfProtection"
+  | "divineWrath"
+  | "shoulderSmash"
+  | "intimidatingPresence"
+  | "stampede";
 export type ScreenId = "boot" | "title" | "campaign" | "worldMap" | "briefing" | "cutscene" | "epilogue" | "battle" | "victory" | "defeat" | "inn" | "testMenu" | "mapEditor";
 export type Phase = "player" | "enemy";
 export type InputMode = "idle" | "selected" | "awaitAction" | "awaitAttack" | "awaitOffHand" | "awaitSpell" | "locked";
