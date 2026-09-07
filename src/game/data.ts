@@ -1482,9 +1482,13 @@ export function emberFromCompleted(completed: string[]): number {
   return n;
 }
 
-export const CURES: Record<HealId, { name: string; dice: number; faces: number; bonus: number; range: number }> = {
-  cureMinor: { name: "Cura Menor", dice: 1, faces: 8, bonus: 3, range: 1 },
-  cureWounds: { name: "Cura Média", dice: 3, faces: 8, bonus: 3, range: 2 },
+// Same shape as the damage spells (see MAGIC_MISSILE/FIREBALL/LIGHTNING): dice stay small
+// and fixed, just for variance between casts — the caster's own MAG (floor(MAG/2) * mul) is
+// what actually carries the heal's growth, the same one lever every other spell here grows
+// by.
+export const CURES: Record<HealId, { name: string; dice: number; faces: number; bonus: number; mul: number; range: number }> = {
+  cureMinor: { name: "Cura Menor", dice: 1, faces: 6, bonus: 0, mul: 1.0, range: 1 },
+  cureWounds: { name: "Cura Média", dice: 2, faces: 6, bonus: 0, mul: 1.6, range: 2 },
 };
 
 export function rollDice(dice: number, faces: number, bonus: number, rng: () => number): number {
@@ -1493,20 +1497,15 @@ export function rollDice(dice: number, faces: number, bonus: number, rng: () => 
   return total;
 }
 
-export function rollCure(kind: HealId, rng: () => number): number {
+export function rollCure(kind: HealId, mag: number, rng: () => number): number {
   const p = CURES[kind];
-  return rollDice(p.dice, p.faces, p.bonus, rng);
+  return Math.floor(mag / 2) * p.mul + rollDice(p.dice, p.faces, p.bonus, rng);
 }
 
 export function diceFormula(dice: number, faces: number, bonus: number): string {
   if (dice <= 0) return "";
   const core = `${dice}D${faces}`;
   return bonus ? `${core}+${bonus}` : core;
-}
-
-export function cureLabel(kind: HealId): string {
-  const p = CURES[kind];
-  return `${p.name} ${diceFormula(p.dice, p.faces, p.bonus)}`;
 }
 
 export function rollPotion(kind: PotionId, rng: () => number): number {
@@ -1524,9 +1523,11 @@ export function diceSpan(dice: number, faces: number, bonus: number): string {
   return `${dice + bonus}–${dice * faces + bonus}`;
 }
 
-export function cureSpan(kind: HealId): string {
+/** Written the way rollCure computes it, so the tooltip and the number that lands agree —
+ * same convention as spellFormula for the damage spells. */
+export function healFormula(mag: number, kind: HealId): string {
   const p = CURES[kind];
-  return diceFormula(p.dice, p.faces, p.bonus);
+  return spellFormula(mag, p.mul, p.dice, p.faces, p.bonus);
 }
 
 export function potionSpan(kind: PotionId): string {
