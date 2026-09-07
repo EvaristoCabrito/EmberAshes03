@@ -106,37 +106,43 @@ export const DECORATIONS: Record<string, DecorationDef> = {
  * SoundFX/ inside that folder is left alone — effects are not tracks. */
 export const MUSIC_TRACKS: string[] = musicManifest;
 
-/** Which drawing to use for each of the six facings, and whether to mirror it.
+/** The six sides a prop can face, numbered the way the editor turns through them:
+ * side 1 east, 2 southeast, 3 southwest, 4 west, 5 northwest, 6 northeast.
  *
  * Isometric art is never turned by rotating the bitmap — a rotated drawing tilts, it does
- * not face a new way. Games swap in a different drawing per facing. The economy is that a
- * horizontal mirror already gives the opposite facing for free: east mirrors to west,
- * southeast to southwest, northeast to northwest. So six facings cost three drawings.
+ * not face a new way. No game does that; they swap in a drawing per side. Side 1 is the
+ * prop's base file, `<id>.png`, so nothing already drawn needs renaming; the others are
+ * `<id>-side2.png` … `<id>-side6.png`, made whenever it is worth making them.
  *
- * rot 0 E, 1 SE, 2 SW, 3 W, 4 NW, 5 NE — the order rotateFootprint turns through.
+ * A horizontal mirror already gives the opposite side, so a drawing covers two: side 1
+ * mirrors to 4, 2 to 3, 6 to 5. That is the economy — six sides for three drawings — but
+ * it is only a fallback. A side with its own file always wins, so drawing side 4 by hand
+ * replaces the mirrored side 1 rather than being ignored.
  */
-export const DECOR_FACING: { art: 0 | 1 | 5; mirror: boolean }[] = [
-  { art: 0, mirror: false }, // E  — drawing "e"
-  { art: 1, mirror: false }, // SE — drawing "se"
-  { art: 1, mirror: true }, // SW — "se" mirrored
-  { art: 0, mirror: true }, // W  — "e" mirrored
-  { art: 5, mirror: true }, // NW — "ne" mirrored
-  { art: 5, mirror: false }, // NE — drawing "ne"
-];
+export const DECOR_MIRROR_SIDE = [3, 2, 1, 0, 5, 4];
 
-/** File suffix for a facing's drawing: "" for east (the base file every prop already has),
- * "-se" and "-ne" for the two others. A prop with no such file falls back to the base. */
-export const DECOR_FACING_SUFFIX: Record<0 | 1 | 5, string> = { 0: "", 1: "-se", 5: "-ne" };
+/** The art file for one side: side 1 is the base file, the rest carry a -sideN suffix. */
+export function decorationSideFile(id: string, step: number): string {
+  return step === 0 ? id : `${id}-side${step + 1}`;
+}
 
-/** The drawing for one facing of a prop, and whether it must be mirrored to face that way.
- * `has` says whether that facing has its own file; when it does not, the caller draws the
- * base art and may fall back to turning the bitmap. */
+/** Which drawing to use for a prop's current facing, and how.
+ *
+ * Asks in order: this side's own drawing, then the drawing that mirrors onto it, then the
+ * base. `own: false` means neither exists and the caller is on the placeholder path —
+ * turning the bitmap, which tilts rather than faces.
+ */
 export function decorationFacing(id: string, rot: number, has: (file: string) => boolean) {
   const step = (((Math.round(rot) % 6) + 6) % 6) as 0 | 1 | 2 | 3 | 4 | 5;
-  const facing = DECOR_FACING[step]!;
-  const file = `${id}${DECOR_FACING_SUFFIX[facing.art]}`;
-  const own = facing.art === 0 || has(file);
-  return { file: own ? file : id, mirror: own ? facing.mirror : false, own, step };
+  if (step === 0) return { file: id, mirror: false, own: true, step, side: 1 };
+  const mine = decorationSideFile(id, step);
+  if (has(mine)) return { file: mine, mirror: false, own: true, step, side: step + 1 };
+  const partner = DECOR_MIRROR_SIDE[step]!;
+  const partnerFile = decorationSideFile(id, partner);
+  if (partner === 0 || has(partnerFile)) {
+    return { file: partnerFile, mirror: true, own: true, step, side: step + 1 };
+  }
+  return { file: id, mirror: false, own: false, step, side: step + 1 };
 }
 
 export function decorationImage(id: string): string {
