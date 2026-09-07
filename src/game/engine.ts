@@ -1,4 +1,4 @@
-import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, CURE_DISEASE, CURES, DECORATIONS, DISEASE, DOUBLE_STRIKE, EMPTY_BAG, EQUIPMENT, EXP_TO_LEVEL, expForHit, FIREBALL, FOOTPRINT_TYPE_7, FOOTPRINT_TYPE_8, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, MAGIC_MISSILE, magicMissileCount, MAX_LEVEL, PIERCING, PIERCING_THRUST, POTION_CARRY_MAX, POTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, WEAPON_MAX_ENH, WEAPONS, WEB_OF_DREAMS, cureSpan, barricadeDecor, decorationCells, decorationImage, diceFormula, effectiveMaxRange, enemyLevelFor, fireballFormula, fireballOrigin, fireballPower, fireballRangeTiles, fireballTiles, hexAreaTiles, isProjectile, isSummonClass, lightningDice, lightningFormula, missionGearLevel, parseLayout, placedFootprint, potionLabel, rollCure, rollDice, rollPotion, spellFormula, spellTier, starterWeaponFor, STARTING_BAG, statsFor, terrainNote, TERRAIN, tierKey, tierUses, gearStatBonus, offHandBlocked, weaponRoll, weightedLootPick, weightedPotionPick, weightedWeaponPick } from "./data";
+import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, CURE_DISEASE, CURES, DECORATIONS, DISEASE, DOUBLE_STRIKE, EMPTY_BAG, EQUIPMENT, EXP_TO_LEVEL, expForHit, FIREBALL, FOOTPRINT_TYPE_7, FOOTPRINT_TYPE_8, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, MAGIC_MISSILE, magicMissileCount, MAX_LEVEL, PIERCING, PIERCING_THRUST, POTION_CARRY_MAX, POTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, WEAPON_MAX_ENH, WEAPONS, WEB_OF_DREAMS, cureSpan, barricadeDecor, decorationCells, decorationFacing, decorationImage, diceFormula, effectiveMaxRange, enemyLevelFor, fireballFormula, fireballOrigin, fireballPower, fireballRangeTiles, fireballTiles, hexAreaTiles, isProjectile, isSummonClass, lightningDice, lightningFormula, missionGearLevel, parseLayout, placedFootprint, potionLabel, rollCure, rollDice, rollPotion, spellFormula, spellTier, starterWeaponFor, STARTING_BAG, statsFor, terrainNote, TERRAIN, tierKey, tierUses, gearStatBonus, offHandBlocked, weaponRoll, weightedLootPick, weightedPotionPick, weightedWeaponPick } from "./data";
 import type { SpellTier } from "./data";
 import { canCounter, makeForecast, mulberry32, powerOf, protOf, rollDamage, rollDamageCustom } from "./combat";
 import {
@@ -3524,6 +3524,18 @@ export class BattleEngine {
     ctx.closePath();
   }
 
+  /** Whether a facing's own drawing exists, kicking off its load the first time it is
+   * asked for. A file that 404s settles as "no" and the prop keeps the base drawing —
+   * every prop starts with only its east art, so this is the normal answer, not a fault. */
+  private decorArtReady(file: string): boolean {
+    const known = this.art.decorations[file];
+    if (known) return known.naturalWidth > 0;
+    const img = new Image();
+    img.src = decorationImage(file);
+    this.art.decorations[file] = img;
+    return false;
+  }
+
   /** Multi-hex terrain props draw as one image over their whole footprint's bounding box,
    * not hex-clipped like regular tiles — they don't need to fill the exact hex shape. */
   private drawDecorations(ctx: CanvasRenderingContext2D, tile: number, cssW: number, cssH: number): void {
@@ -3594,17 +3606,24 @@ export class BattleEngine {
                   ? tile * 1.65
                   : tile * (1.5 * (maxDy - minDy) + 2.3);
       const dy = tree ? -tile * 0.55 : wall ? -tile * 0.12 : house ? -tile * 0.28 : item ? tile * 0.08 : 0;
-      const turn = (((p.rot ?? 0) % 6) + 6) % 6;
-      if (turn === 0) {
-        ctx.drawImage(img, cx - w / 2, cy - h / 2 + dy, w, h);
-      } else {
-        // Turn the art with its footprint: a two-hex wall that now runs the other way has
-        // to be drawn running the other way, or it covers hexes it does not look like it
-        // covers. Rotating about the centre the unturned draw uses keeps the two aligned.
+      // Facing art if the prop has it, the way isometric games do it: a drawing per facing,
+      // mirrored to cover the opposite one. Only when a facing has no drawing do we fall
+      // back to turning the bitmap, which tilts rather than faces and is a placeholder.
+      const facing = decorationFacing(p.id, p.rot ?? 0, (file) => this.decorArtReady(file));
+      const art = facing.own ? (this.art.decorations[facing.file] ?? img) : img;
+      if (facing.step === 0) {
+        ctx.drawImage(art, cx - w / 2, cy - h / 2 + dy, w, h);
+      } else if (facing.own) {
         ctx.save();
         ctx.translate(cx, cy + dy);
-        ctx.rotate((turn * Math.PI) / 3);
-        ctx.drawImage(img, -w / 2, -h / 2, w, h);
+        if (facing.mirror) ctx.scale(-1, 1);
+        ctx.drawImage(art, -w / 2, -h / 2, w, h);
+        ctx.restore();
+      } else {
+        ctx.save();
+        ctx.translate(cx, cy + dy);
+        ctx.rotate((facing.step * Math.PI) / 3);
+        ctx.drawImage(art, -w / 2, -h / 2, w, h);
         ctx.restore();
       }
     }

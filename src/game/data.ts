@@ -106,6 +106,39 @@ export const DECORATIONS: Record<string, DecorationDef> = {
  * SoundFX/ inside that folder is left alone — effects are not tracks. */
 export const MUSIC_TRACKS: string[] = musicManifest;
 
+/** Which drawing to use for each of the six facings, and whether to mirror it.
+ *
+ * Isometric art is never turned by rotating the bitmap — a rotated drawing tilts, it does
+ * not face a new way. Games swap in a different drawing per facing. The economy is that a
+ * horizontal mirror already gives the opposite facing for free: east mirrors to west,
+ * southeast to southwest, northeast to northwest. So six facings cost three drawings.
+ *
+ * rot 0 E, 1 SE, 2 SW, 3 W, 4 NW, 5 NE — the order rotateFootprint turns through.
+ */
+export const DECOR_FACING: { art: 0 | 1 | 5; mirror: boolean }[] = [
+  { art: 0, mirror: false }, // E  — drawing "e"
+  { art: 1, mirror: false }, // SE — drawing "se"
+  { art: 1, mirror: true }, // SW — "se" mirrored
+  { art: 0, mirror: true }, // W  — "e" mirrored
+  { art: 5, mirror: true }, // NW — "ne" mirrored
+  { art: 5, mirror: false }, // NE — drawing "ne"
+];
+
+/** File suffix for a facing's drawing: "" for east (the base file every prop already has),
+ * "-se" and "-ne" for the two others. A prop with no such file falls back to the base. */
+export const DECOR_FACING_SUFFIX: Record<0 | 1 | 5, string> = { 0: "", 1: "-se", 5: "-ne" };
+
+/** The drawing for one facing of a prop, and whether it must be mirrored to face that way.
+ * `has` says whether that facing has its own file; when it does not, the caller draws the
+ * base art and may fall back to turning the bitmap. */
+export function decorationFacing(id: string, rot: number, has: (file: string) => boolean) {
+  const step = (((Math.round(rot) % 6) + 6) % 6) as 0 | 1 | 2 | 3 | 4 | 5;
+  const facing = DECOR_FACING[step]!;
+  const file = `${id}${DECOR_FACING_SUFFIX[facing.art]}`;
+  const own = facing.art === 0 || has(file);
+  return { file: own ? file : id, mirror: own ? facing.mirror : false, own, step };
+}
+
 export function decorationImage(id: string): string {
   return `/game/decorations/${id}.png${
     id === "locked-chest"

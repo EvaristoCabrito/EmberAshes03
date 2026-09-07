@@ -1526,6 +1526,16 @@ function TestMenuScreen({
   );
 }
 
+/** Index of a cell in the flat tile array, or -1 when it is off the board.
+ *
+ * A prop may hang off the edge, so its footprint routinely names cells that do not exist.
+ * `y * cols + x` cannot express that: x = -1 lands on the previous row's last cell, so
+ * stamping a footprint blind would silently repaint a hex on the far side of the map. */
+function cellIndex(x: number, y: number, cols: number, rows: number): number {
+  if (x < 0 || y < 0 || x >= cols || y >= rows) return -1;
+  return y * cols + x;
+}
+
 const MAP_VERSIONS_KEY = "ember-map-versions";
 const MAP_ACTIVE_KEY = "ember-map-active";
 const EDITOR_COLS_DEFAULT = 10;
@@ -2111,13 +2121,7 @@ function MapEditorScreen({
       const after = placedFootprint(turned);
       const others = decorationCells(d.decorations.filter((p) => p !== hit));
       for (const f of after) {
-        const cx = hit.x + f.dx;
-        const cy = hit.y + f.dy;
-        if (cx < 0 || cy < 0 || cx >= d.cols || cy >= d.rows) {
-          setNote(`${def.name} nao cabe girada aqui — sairia do tabuleiro. Mova antes de girar.`);
-          return d;
-        }
-        if (others.has(`${cx},${cy}`)) {
+        if (others.has(`${hit.x + f.dx},${hit.y + f.dy}`)) {
           setNote(`${def.name} nao cabe girada aqui — bateria em outra decoracao.`);
           return d;
         }
@@ -2126,10 +2130,13 @@ function MapEditorScreen({
       if (def.tile) {
         const floor: TerrainId = d.tiles.includes("nave") ? "nave" : "plains";
         for (const f of before) {
-          const i = (hit.y + f.dy) * d.cols + (hit.x + f.dx);
-          if (tiles[i] === def.tile) tiles[i] = floor;
+          const i = cellIndex(hit.x + f.dx, hit.y + f.dy, d.cols, d.rows);
+          if (i >= 0 && tiles[i] === def.tile) tiles[i] = floor;
         }
-        for (const f of after) tiles[(hit.y + f.dy) * d.cols + (hit.x + f.dx)] = def.tile;
+        for (const f of after) {
+          const i = cellIndex(hit.x + f.dx, hit.y + f.dy, d.cols, d.rows);
+          if (i >= 0) tiles[i] = def.tile;
+        }
       }
       setNote(`${def.name} em ${hit.x},${hit.y}: girada para ${turned.rot * 60}°${turned.rot === 0 ? " (de volta ao original)" : ""}.`);
       return { ...d, tiles, decorations: d.decorations.map((p) => (p === hit ? turned : p)) };
@@ -2151,24 +2158,26 @@ function MapEditorScreen({
         const tiles = [...d.tiles];
         if (hitDef?.tile) {
           for (const f of placedFootprint(hit)) {
-            const i = (hit.y + f.dy) * d.cols + (hit.x + f.dx);
-            if (tiles[i] === hitDef.tile) tiles[i] = floor;
+            const i = cellIndex(hit.x + f.dx, hit.y + f.dy, d.cols, d.rows);
+            if (i >= 0 && tiles[i] === hitDef.tile) tiles[i] = floor;
           }
         }
         return { ...d, tiles, decorations: d.decorations.filter((p) => p !== hit) };
       }
       const def = DECORATIONS[decoBrush];
       if (!def) return d;
-      // refuse to place if any covered cell is out of bounds or already taken
+      // A prop may hang off the edge — half a ridge or a cave mouth running past the last
+      // hex is the point. Only another prop blocks it; the cells beyond the board simply
+      // have no tile to stamp.
       for (const f of def.footprint) {
-        const cx = x + f.dx;
-        const cy = y + f.dy;
-        if (cx < 0 || cy < 0 || cx >= d.cols || cy >= d.rows) return d;
-        if (covered.has(`${cx},${cy}`)) return d;
+        if (covered.has(`${x + f.dx},${y + f.dy}`)) return d;
       }
       const tiles = [...d.tiles];
       if (def.tile) {
-        for (const f of def.footprint) tiles[(y + f.dy) * d.cols + (x + f.dx)] = def.tile;
+        for (const f of def.footprint) {
+          const i = cellIndex(x + f.dx, y + f.dy, d.cols, d.rows);
+          if (i >= 0) tiles[i] = def.tile;
+        }
       }
       return { ...d, tiles, decorations: [...d.decorations, { id: decoBrush, x, y }] };
       
