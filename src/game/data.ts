@@ -1819,6 +1819,18 @@ export function magicMissileCount(level: number): number {
   return 1;
 }
 
+/** Enemy mages (currently just the cultist/"Feiticeiro") — how many casts of Magic Missile
+ * and Lightning they're spawned with per battle, spent one at a time by runAiFor's cultist
+ * branch (unlike a player caster, each cast is a single missile at a single target, never the
+ * player's own click-N-targets spread). Level 1-3: one Magic Missile cast; level 4-6: two;
+ * level 7+: three. Lightning joins on top at level 10, one cast. */
+export function cultistSpellUses(level: number): { magicMissile: number; lightning: number } {
+  return {
+    magicMissile: level >= 7 ? 3 : level >= 4 ? 2 : 1,
+    lightning: level >= 10 ? 1 : 0,
+  };
+}
+
 /** Conjurer tier 1: summons a controllable ally at half the conjurer's current stats
  * (recomputed from the conjurer at cast time, so a later-battle or higher-level cast comes
  * in stronger) anywhere within range, passable and unoccupied. Stays until the battle ends —
