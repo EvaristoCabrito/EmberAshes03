@@ -6,6 +6,11 @@
   not the next one up, not a scheme that seemed tidier. The same goes for counts, sizes and
   any other figure they name.
 
+- **Always show the screenshots.** This is a game — the user works by looking at it. Any
+  screenshot taken while verifying a change gets sent to them, not just read and described.
+  Describing a picture instead of showing it hides the work and wastes their time. Send the
+  before/after of anything visual, every time, without being asked.
+
 - When asked to "increase" or "add more" of something (loot, decoration density, chest
   counts, etc.), take the middle path — a moderate, proportionate bump. Do not max it out
   or overdo it unless explicitly told to go big.
