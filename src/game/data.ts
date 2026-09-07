@@ -1831,6 +1831,17 @@ export function cultistSpellUses(level: number): { magicMissile: number; lightni
   };
 }
 
+/** Enemy archers (currently just the brigand/"Besteiro") — how many casts of Long Shot and
+ * Piercing they're spawned with per battle, spent one at a time by runAiFor's brigand branch.
+ * Same shape as cultistSpellUses: level 1-3 one Long Shot cast, level 4-6 two, level 7+ three;
+ * Piercing joins on top at level 10, one cast. */
+export function brigandSpellUses(level: number): { longShot: number; piercing: number } {
+  return {
+    longShot: level >= 7 ? 3 : level >= 4 ? 2 : 1,
+    piercing: level >= 10 ? 1 : 0,
+  };
+}
+
 /** Conjurer tier 1: summons a controllable ally at half the conjurer's current stats
  * (recomputed from the conjurer at cast time, so a later-battle or higher-level cast comes
  * in stronger) anywhere within range, passable and unoccupied. Stays until the battle ends —

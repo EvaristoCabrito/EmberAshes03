@@ -1,4 +1,4 @@
-import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, cleaveFormula, cleavePower, CURE_DISEASE, CURES, DECORATIONS, DISEASE, DOUBLE_STRIKE, doubleStrikeFormula, doubleStrikePower, EMPTY_BAG, EQUIPMENT, EXP_TO_LEVEL, expForHit, FIREBALL, FOOTPRINT_TYPE_7, FOOTPRINT_TYPE_8, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, longShotFormula, longShotPower, MAGIC_MISSILE, magicMissileCount, MAX_LEVEL, PIERCING, piercingMul, PIERCING_THRUST, POTION_CARRY_MAX, POTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, WEAPON_MAX_ENH, WEAPONS, WEB_OF_DREAMS, healFormula, barricadeDecor, decorationCells, decorationFacing, decorationImage, diceFormula, effectiveMaxRange, enemyLevelFor, fireballFormula, fireballOrigin, fireballPower, fireballRangeTiles, fireballTiles, hexAreaTiles, isProjectile, isSummonClass, lightningDice, lightningFormula, missionGearLevel, parseLayout, placedFootprint, potionLabel, rollCure, rollDice, rollPotion, spellFormula, spellTier, starterWeaponFor, STARTING_BAG, statsFor, terrainNote, TERRAIN, tierKey, tierUses, gearStatBonus, offHandBlocked, weaponRoll, weightedLootPick, weightedPotionPick, weightedWeaponPick, MULTI_SHOT, multiShotFormula, multiShotPower, multiShotTargets, SECOND_WIND, secondWindPct, auraPower, AURA_OF_PROTECTION, INTIMIDATING_PRESENCE, DIVINE_WRATH, divineWrathFormula, divineWrathPower, SHOULDER_SMASH, shoulderSmashFormula, shoulderSmashPower, STAMPEDE, stampedeFormula, stampedePower, cultistSpellUses } from "./data";
+import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, cleaveFormula, cleavePower, CURE_DISEASE, CURES, DECORATIONS, DISEASE, DOUBLE_STRIKE, doubleStrikeFormula, doubleStrikePower, EMPTY_BAG, EQUIPMENT, EXP_TO_LEVEL, expForHit, FIREBALL, FOOTPRINT_TYPE_7, FOOTPRINT_TYPE_8, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, longShotFormula, longShotPower, MAGIC_MISSILE, magicMissileCount, MAX_LEVEL, PIERCING, piercingMul, PIERCING_THRUST, POTION_CARRY_MAX, POTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, WEAPON_MAX_ENH, WEAPONS, WEB_OF_DREAMS, healFormula, barricadeDecor, decorationCells, decorationFacing, decorationImage, diceFormula, effectiveMaxRange, enemyLevelFor, fireballFormula, fireballOrigin, fireballPower, fireballRangeTiles, fireballTiles, hexAreaTiles, isProjectile, isSummonClass, lightningDice, lightningFormula, missionGearLevel, parseLayout, placedFootprint, potionLabel, rollCure, rollDice, rollPotion, spellFormula, spellTier, starterWeaponFor, STARTING_BAG, statsFor, terrainNote, TERRAIN, tierKey, tierUses, gearStatBonus, offHandBlocked, weaponRoll, weightedLootPick, weightedPotionPick, weightedWeaponPick, MULTI_SHOT, multiShotFormula, multiShotPower, multiShotTargets, SECOND_WIND, secondWindPct, auraPower, AURA_OF_PROTECTION, INTIMIDATING_PRESENCE, DIVINE_WRATH, divineWrathFormula, divineWrathPower, SHOULDER_SMASH, shoulderSmashFormula, shoulderSmashPower, STAMPEDE, stampedeFormula, stampedePower, cultistSpellUses, brigandSpellUses } from "./data";
 import type { SpellTier } from "./data";
 import { canCounter, makeForecast, mulberry32, powerOf, protOf, rollDamage, rollDamageCustom } from "./combat";
 import {
@@ -347,9 +347,19 @@ function spawnUnit(spawn: Mission["playerSpawns"][number], side: Unit["side"], i
     bag: side === "player" ? { ...(roster?.bags?.[spawn.name] ?? (cls.id === "healer" ? EMPTY_BAG : STARTING_BAG)) } : { ...EMPTY_BAG },
     spells: {
       // Cultist is enemy-only, so this never competes with a player roster's own tier1/tier2
-      // uses — see cultistSpellUses and runAiFor's cultist branch.
-      tier1: cls.id === "cultist" ? cultistSpellUses(level).magicMissile : remainingTier(cls.id, 1, "tier1", level, side, roster, spawn.name),
-      tier2: cls.id === "cultist" ? cultistSpellUses(level).lightning : remainingTier(cls.id, 2, "tier2", level, side, roster, spawn.name),
+      // uses — see cultistSpellUses/brigandSpellUses and runAiFor's cultist/brigand branches.
+      tier1:
+        cls.id === "cultist"
+          ? cultistSpellUses(level).magicMissile
+          : cls.id === "brigand"
+            ? brigandSpellUses(level).longShot
+            : remainingTier(cls.id, 1, "tier1", level, side, roster, spawn.name),
+      tier2:
+        cls.id === "cultist"
+          ? cultistSpellUses(level).lightning
+          : cls.id === "brigand"
+            ? brigandSpellUses(level).piercing
+            : remainingTier(cls.id, 2, "tier2", level, side, roster, spawn.name),
       tier3: remainingTier(cls.id, 3, "tier3", level, side, roster, spawn.name),
       tier4: remainingTier(cls.id, 4, "tier4", level, side, roster, spawn.name),
       tier5: remainingTier(cls.id, 5, "tier5", level, side, roster, spawn.name),
@@ -3492,6 +3502,61 @@ export class BattleEngine {
             spellMul: MAGIC_MISSILE.mul,
             spellKind: "magicMissile",
           });
+        }
+        this.queue.push({ type: "delay", dur: 0.12 });
+        return;
+      }
+    }
+
+    // Brigand ("Besteiro") is the one enemy archer — see brigandSpellUses. Piercing outranks
+    // Long Shot whenever both are still banked, same priority shape as the cultist branch
+    // above. Long Shot picks one target the same way; Piercing aims THROUGH a target the same
+    // way castPiercing does, so it can also clip whoever else stands on that line (allies
+    // included) — no side filter, matching the player-facing spell.
+    if (next.classId === "brigand" && (next.spells.tier1 > 0 || next.spells.tier2 > 0)) {
+      const spellKind: "piercing" | "longShot" = next.spells.tier2 > 0 ? "piercing" : "longShot";
+      const longMax = next.maxRange * LONG_SHOT.rangeMul + LONG_SHOT.rangeBonus;
+      let bestSpell: { foe: Unit; from: Point; score: number } | null = null;
+      for (const cell of reach.values()) {
+        for (const foe of players) {
+          if (spellKind === "longShot") {
+            const d = manhattan(cell, foe);
+            if (d < next.minRange || d > longMax) continue;
+            if (!clearShot(cell, { x: foe.x, y: foe.y }, this.tiles, this.cols, "arrow")) continue;
+          } else {
+            const line = this.piercingRay({ x: cell.x, y: cell.y }, { x: foe.x, y: foe.y });
+            if (!line || !line.some((p) => p.x === foe.x && p.y === foe.y)) continue;
+          }
+          const score = (foe.maxHp - foe.hp) * 3 + (foe.hp <= 8 ? 20 : 0);
+          if (!bestSpell || score > bestSpell.score) bestSpell = { foe, from: { x: cell.x, y: cell.y }, score };
+        }
+      }
+      if (bestSpell) {
+        if (bestSpell.from.x !== next.x || bestSpell.from.y !== next.y) {
+          this.queue.push({ type: "move", id: next.id, path: reconstructPath(reach, bestSpell.from) });
+        }
+        this.spendTier(next, spellKind);
+        if (spellKind === "longShot") {
+          const power = longShotPower(next.level);
+          this.queue.push({
+            type: "spell",
+            att: next.id,
+            tiles: [{ x: bestSpell.foe.x, y: bestSpell.foe.y }],
+            ids: [bestSpell.foe.id],
+            label: LONG_SHOT.name,
+            weaponBonusDice: power.dice,
+            weaponBonusFaces: power.faces,
+            weaponBonusBonus: 0,
+            spellKind: "longShot",
+          });
+        } else {
+          const line = this.piercingRay(bestSpell.from, { x: bestSpell.foe.x, y: bestSpell.foe.y })!;
+          const ids: string[] = [];
+          for (const t of line) {
+            const who = this.units.find((u) => u.alive && occupies(u, t.x, t.y));
+            if (who && who.id !== next.id && !ids.includes(who.id)) ids.push(who.id);
+          }
+          this.queue.push({ type: "spell", att: next.id, tiles: line, ids, label: PIERCING.name, dmgMul: piercingMul(next.level), spellKind: "piercing" });
         }
         this.queue.push({ type: "delay", dur: 0.12 });
         return;
