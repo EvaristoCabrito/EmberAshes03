@@ -147,12 +147,64 @@ export function barricadeDecor(
   return out;
 }
 
-export function decorationCells(placements: { id: string; x: number; y: number }[]): Set<string> {
+/** A footprint offset turned `rot` sixths of a circle about its anchor hex.
+ *
+ * Offsets are odd-r, where a row's horizontal shift depends on its parity, so a relative
+ * offset cannot be turned on its own — the same (dx, dy) means different neighbours on an
+ * odd row than on an even one. The turn therefore happens in cube space around the real
+ * anchor: offset to cube, subtract the anchor, rotate (x, y, z) -> (-z, -x, -y) per step,
+ * add the anchor back, and convert home.
+ *
+ * This never touches the shape constants themselves — a footprint is read, turned for this
+ * one placement, and the constant stays exactly as it was written.
+ */
+export function rotateFootprint(
+  footprint: readonly { dx: number; dy: number }[],
+  anchorX: number,
+  anchorY: number,
+  rot: number,
+): { dx: number; dy: number }[] {
+  const steps = ((Math.round(rot) % 6) + 6) % 6;
+  if (steps === 0) return footprint.map(({ dx, dy }) => ({ dx, dy }));
+  // odd-r offset <-> cube. `row - (row & 1)` is the shift for a row, and & 1 is only right
+  // for non-negative rows, so use a modulo that is correct for negative ones too.
+  const parity = (row: number) => ((row % 2) + 2) % 2;
+  const toCube = (col: number, row: number) => {
+    const x = col - (row - parity(row)) / 2;
+    const z = row;
+    return { x, y: -x - z, z };
+  };
+  const toOffset = (x: number, z: number) => ({ col: x + (z - parity(z)) / 2, row: z });
+  const anchor = toCube(anchorX, anchorY);
+  return footprint.map(({ dx, dy }) => {
+    const cell = toCube(anchorX + dx, anchorY + dy);
+    let x = cell.x - anchor.x;
+    let y = cell.y - anchor.y;
+    let z = cell.z - anchor.z;
+    for (let i = 0; i < steps; i++) {
+      const nx = -z;
+      const ny = -x;
+      const nz = -y;
+      x = nx;
+      y = ny;
+      z = nz;
+    }
+    const back = toOffset(x + anchor.x, z + anchor.z);
+    return { dx: back.col - anchorX, dy: back.row - anchorY };
+  });
+}
+
+/** The footprint a placement actually occupies, turned if it says it is turned. */
+export function placedFootprint(p: { id: string; x: number; y: number; rot?: number }): { dx: number; dy: number }[] {
+  const def = DECORATIONS[p.id];
+  if (!def) return [];
+  return rotateFootprint(def.footprint, p.x, p.y, p.rot ?? 0);
+}
+
+export function decorationCells(placements: { id: string; x: number; y: number; rot?: number }[]): Set<string> {
   const out = new Set<string>();
   for (const p of placements) {
-    const def = DECORATIONS[p.id];
-    if (!def) continue;
-    for (const { dx, dy } of def.footprint) out.add(`${p.x + dx},${p.y + dy}`);
+    for (const { dx, dy } of placedFootprint(p)) out.add(`${p.x + dx},${p.y + dy}`);
   }
   return out;
 }

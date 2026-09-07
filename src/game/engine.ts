@@ -1,4 +1,4 @@
-import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, CURE_DISEASE, CURES, DECORATIONS, DISEASE, DOUBLE_STRIKE, EMPTY_BAG, EQUIPMENT, EXP_TO_LEVEL, expForHit, FIREBALL, FOOTPRINT_TYPE_7, FOOTPRINT_TYPE_8, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, MAGIC_MISSILE, magicMissileCount, MAX_LEVEL, PIERCING, PIERCING_THRUST, POTION_CARRY_MAX, POTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, WEAPON_MAX_ENH, WEAPONS, WEB_OF_DREAMS, cureSpan, barricadeDecor, decorationCells, decorationImage, diceFormula, effectiveMaxRange, enemyLevelFor, fireballFormula, fireballOrigin, fireballPower, fireballRangeTiles, fireballTiles, hexAreaTiles, isProjectile, isSummonClass, lightningDice, lightningFormula, missionGearLevel, parseLayout, potionLabel, rollCure, rollDice, rollPotion, spellFormula, spellTier, starterWeaponFor, STARTING_BAG, statsFor, terrainNote, TERRAIN, tierKey, tierUses, gearStatBonus, offHandBlocked, weaponRoll, weightedLootPick, weightedPotionPick, weightedWeaponPick } from "./data";
+import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, CURE_DISEASE, CURES, DECORATIONS, DISEASE, DOUBLE_STRIKE, EMPTY_BAG, EQUIPMENT, EXP_TO_LEVEL, expForHit, FIREBALL, FOOTPRINT_TYPE_7, FOOTPRINT_TYPE_8, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, MAGIC_MISSILE, magicMissileCount, MAX_LEVEL, PIERCING, PIERCING_THRUST, POTION_CARRY_MAX, POTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, WEAPON_MAX_ENH, WEAPONS, WEB_OF_DREAMS, cureSpan, barricadeDecor, decorationCells, decorationImage, diceFormula, effectiveMaxRange, enemyLevelFor, fireballFormula, fireballOrigin, fireballPower, fireballRangeTiles, fireballTiles, hexAreaTiles, isProjectile, isSummonClass, lightningDice, lightningFormula, missionGearLevel, parseLayout, placedFootprint, potionLabel, rollCure, rollDice, rollPotion, spellFormula, spellTier, starterWeaponFor, STARTING_BAG, statsFor, terrainNote, TERRAIN, tierKey, tierUses, gearStatBonus, offHandBlocked, weaponRoll, weightedLootPick, weightedPotionPick, weightedWeaponPick } from "./data";
 import type { SpellTier } from "./data";
 import { canCounter, makeForecast, mulberry32, powerOf, protOf, rollDamage, rollDamageCustom } from "./combat";
 import {
@@ -519,7 +519,7 @@ export class BattleEngine {
     for (const p of this.decorations) {
       const def = DECORATIONS[p.id];
       if (!def?.tile) continue;
-      for (const { dx, dy } of def.footprint) {
+      for (const { dx, dy } of placedFootprint(p)) {
         const x = p.x + dx;
         const y = p.y + dy;
         if (x >= 0 && x < this.cols && y >= 0 && y < this.rows) this.tiles[y * this.cols + x] = def.tile;
@@ -3543,11 +3543,16 @@ export class BattleEngine {
       let maxDy = 0;
       let sumCx = 0;
       let sumCy = 0;
+      // The shape sets how big the image is drawn; the turn is applied to the canvas
+      // below, so the box is measured unturned and carried around with it. The centre,
+      // though, has to be where the prop actually sits once turned.
       for (const { dx, dy } of def.footprint) {
         minDx = Math.min(minDx, dx);
         maxDx = Math.max(maxDx, dx);
         minDy = Math.min(minDy, dy);
         maxDy = Math.max(maxDy, dy);
+      }
+      for (const { dx, dy } of placedFootprint(p)) {
         const c = this.hexCenter(p.x + dx, p.y + dy);
         sumCx += c.cx;
         sumCy += c.cy;
@@ -3589,7 +3594,19 @@ export class BattleEngine {
                   ? tile * 1.65
                   : tile * (1.5 * (maxDy - minDy) + 2.3);
       const dy = tree ? -tile * 0.55 : wall ? -tile * 0.12 : house ? -tile * 0.28 : item ? tile * 0.08 : 0;
-      ctx.drawImage(img, cx - w / 2, cy - h / 2 + dy, w, h);
+      const turn = (((p.rot ?? 0) % 6) + 6) % 6;
+      if (turn === 0) {
+        ctx.drawImage(img, cx - w / 2, cy - h / 2 + dy, w, h);
+      } else {
+        // Turn the art with its footprint: a two-hex wall that now runs the other way has
+        // to be drawn running the other way, or it covers hexes it does not look like it
+        // covers. Rotating about the centre the unturned draw uses keeps the two aligned.
+        ctx.save();
+        ctx.translate(cx, cy + dy);
+        ctx.rotate((turn * Math.PI) / 3);
+        ctx.drawImage(img, -w / 2, -h / 2, w, h);
+        ctx.restore();
+      }
     }
   }
 

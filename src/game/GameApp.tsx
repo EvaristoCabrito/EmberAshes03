@@ -6,7 +6,7 @@ import { installAudioUnlock, playFile, playMenuMusic, playTheme, resumeAudio, se
 import { BattleCanvas } from "./BattleCanvas";
 import { InnScreen } from "./InnScreen";
 import { BackpackScreen, PaperDollScreen } from "./InventoryScreens";
-import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, CURE_DISEASE, CURES, DECORATIONS, DOUBLE_STRIKE, EQUIPMENT, EXP_TO_LEVEL, FIREBALL, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, MAGIC_MISSILE, PIERCING, PIERCING_THRUST, MAX_LEVEL, POTIONS, POTION_LOOT_WEIGHT, PROMOTE_LEVEL, PROMOTED_BASE, PROMOTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, TERRAIN, WEAPONS, WEAPON_MAX_ENH, WEB_OF_DREAMS, BAG_MAX, LOCKPICK_PRICE, POTION_CARRY_MAX, POTION_PRICE, barricadeDecor, decorationCells, decorationImage, diceFormula, emberForKill, enemyLevelFor, equippedPouchId, fireballFormula, lightningFormula, dressMap, isSummonClass, MUSIC_TRACKS, SUMMON_CLASSES, parseLayout, potionLabel, pouchIcon, rangeLabel, sheetLine, spellFormula, spellTier, startingBags, statsFor, terrainNote, tierKey, tierUses, weaponEnhCost, weaponSellValue, type SpellTier } from "./data";
+import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, CURE_DISEASE, CURES, DECORATIONS, DOUBLE_STRIKE, EQUIPMENT, EXP_TO_LEVEL, FIREBALL, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, MAGIC_MISSILE, PIERCING, PIERCING_THRUST, MAX_LEVEL, POTIONS, POTION_LOOT_WEIGHT, PROMOTE_LEVEL, PROMOTED_BASE, PROMOTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, TERRAIN, WEAPONS, WEAPON_MAX_ENH, WEB_OF_DREAMS, BAG_MAX, LOCKPICK_PRICE, POTION_CARRY_MAX, POTION_PRICE, barricadeDecor, decorationCells, placedFootprint, decorationImage, diceFormula, emberForKill, enemyLevelFor, equippedPouchId, fireballFormula, lightningFormula, dressMap, isSummonClass, MUSIC_TRACKS, SUMMON_CLASSES, parseLayout, potionLabel, pouchIcon, rangeLabel, sheetLine, spellFormula, spellTier, startingBags, statsFor, terrainNote, tierKey, tierUses, weaponEnhCost, weaponSellValue, type SpellTier } from "./data";
 import { BattleEngine } from "./engine";
 import { WorldMapScreen } from "./WorldMapScreen";
 import { DISPLAY_VERSION } from "./version";
@@ -1831,6 +1831,7 @@ function MapEditorScreen({
   const [variant, setVariant] = useState(0);
   // While armed, clicking a hex in Terreno mode turns it instead of painting it.
   const [turning, setTurning] = useState(false);
+  const [turningDeco, setTurningDeco] = useState(false);
   const [decoBrush, setDecoBrush] = useState<string>(Object.keys(DECORATIONS)[0]!);
   const [mode, setMode] = useState<"paint" | "player" | "enemy" | "summon" | "decoration">("paint");
   // Which summon class the "Invocação" brush drops. Summons live in playerSpawns alongside
@@ -2000,7 +2001,7 @@ function MapEditorScreen({
     for (const p of draft.decorations) {
       const def = DECORATIONS[p.id];
       if (!def) continue;
-      for (const f of def.footprint) m.set(`${p.x + f.dx},${p.y + f.dy}`, def.name);
+      for (const f of placedFootprint(p)) m.set(`${p.x + f.dx},${p.y + f.dy}`, def.name);
     }
     return m;
   }, [draft.decorations]);
@@ -2012,7 +2013,7 @@ function MapEditorScreen({
     const y = Math.floor(i / draft.cols);
     const under = draft.decorations.find((p) => {
       const def = DECORATIONS[p.id];
-      return def?.tile && def.footprint.some((f) => p.x + f.dx === x && p.y + f.dy === y);
+      return def?.tile && placedFootprint(p).some((f) => p.x + f.dx === x && p.y + f.dy === y);
     });
     if (under) {
       const def = DECORATIONS[under.id]!;
@@ -2090,15 +2091,57 @@ function MapEditorScreen({
     });
   };
 
+  /** Turns the prop under (x, y) one sixth of a circle, footprint and all.
+   *
+   * Refuses the turn when the new footprint would leave the board or land on another
+   * prop — the same rule placing one obeys — so a turn can never silently overlap. The
+   * terrain the prop stamps moves with it: lifted off the hexes it leaves, laid on the
+   * ones it takes, or a turned house would leave climbable ground behind it. */
+  const turnDecoration = (x: number, y: number) => {
+    setDraft((d) => {
+      const hit = d.decorations.find((p) => placedFootprint(p).some((f) => p.x + f.dx === x && p.y + f.dy === y));
+      if (!hit) {
+        setNote("Nao ha decoracao nessa casa pra girar.");
+        return d;
+      }
+      const def = DECORATIONS[hit.id];
+      if (!def) return d;
+      const turned = { ...hit, rot: (((hit.rot ?? 0) + 1) % 6) };
+      const before = placedFootprint(hit);
+      const after = placedFootprint(turned);
+      const others = decorationCells(d.decorations.filter((p) => p !== hit));
+      for (const f of after) {
+        const cx = hit.x + f.dx;
+        const cy = hit.y + f.dy;
+        if (cx < 0 || cy < 0 || cx >= d.cols || cy >= d.rows) {
+          setNote(`${def.name} nao cabe girada aqui — sairia do tabuleiro. Mova antes de girar.`);
+          return d;
+        }
+        if (others.has(`${cx},${cy}`)) {
+          setNote(`${def.name} nao cabe girada aqui — bateria em outra decoracao.`);
+          return d;
+        }
+      }
+      const tiles = [...d.tiles];
+      if (def.tile) {
+        const floor: TerrainId = d.tiles.includes("nave") ? "nave" : "plains";
+        for (const f of before) {
+          const i = (hit.y + f.dy) * d.cols + (hit.x + f.dx);
+          if (tiles[i] === def.tile) tiles[i] = floor;
+        }
+        for (const f of after) tiles[(hit.y + f.dy) * d.cols + (hit.x + f.dx)] = def.tile;
+      }
+      setNote(`${def.name} em ${hit.x},${hit.y}: girada para ${turned.rot * 60}°${turned.rot === 0 ? " (de volta ao original)" : ""}.`);
+      return { ...d, tiles, decorations: d.decorations.map((p) => (p === hit ? turned : p)) };
+    });
+  };
+
   const toggleDecoration = (x: number, y: number) => {
     setDraft((d) => {
       const covered = decorationCells(d.decorations);
       // clicking any hex a decoration already covers removes that whole placement,
       // regardless of which cell of its footprint was clicked
-      const hit = d.decorations.find((p) => {
-        const def = DECORATIONS[p.id];
-        return def?.footprint.some((f) => p.x + f.dx === x && p.y + f.dy === y);
-      });
+      const hit = d.decorations.find((p) => placedFootprint(p).some((f) => p.x + f.dx === x && p.y + f.dy === y));
       // A decoration is art; the tile under it carries every rule. So the tile is laid with
       // the prop and lifted with it, and the two cannot drift apart: a house prop over
       // plains would look climbable and be flat ground.
@@ -2107,7 +2150,7 @@ function MapEditorScreen({
         const hitDef = DECORATIONS[hit.id];
         const tiles = [...d.tiles];
         if (hitDef?.tile) {
-          for (const f of hitDef.footprint) {
+          for (const f of placedFootprint(hit)) {
             const i = (hit.y + f.dy) * d.cols + (hit.x + f.dx);
             if (tiles[i] === hitDef.tile) tiles[i] = floor;
           }
@@ -2142,11 +2185,12 @@ function MapEditorScreen({
       } else setTile(i, brush);
     }
     else if (mode === "decoration") {
+      if (turningDeco) {
+        turnDecoration(x, y);
+        return;
+      }
       const def = DECORATIONS[decoBrush];
-      const existing = draft.decorations.some((p) => {
-        const d2 = DECORATIONS[p.id];
-        return d2?.footprint.some((f) => p.x + f.dx === x && p.y + f.dy === y);
-      });
+      const existing = draft.decorations.some((p) => placedFootprint(p).some((f) => p.x + f.dx === x && p.y + f.dy === y));
       if (!existing && def?.tile) {
         setNote(`${def.name} sobre ${TERRAIN[def.tile].name.toLowerCase()} — ${TERRAIN[def.tile].passable ? "dá pra subir em cima" : "não se atravessa"}.`);
       }
@@ -2721,10 +2765,27 @@ function MapEditorScreen({
         )}
         {mode === "decoration" && (
           <div className="flex flex-col gap-2">
-            <p className="text-xs text-muted">
-              Clique na casa âncora pra colocar; clique em qualquer casa que a decoração cubra pra remover. Toda casa
-              coberta fica intransponível e bloqueia visão/tiro, não importa o terreno por baixo.
-            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-xs text-muted flex-1 min-w-[12rem]">
+                Clique na casa âncora pra colocar; clique em qualquer casa que a decoração cubra pra remover. Toda casa
+                coberta fica intransponível e bloqueia visão/tiro, não importa o terreno por baixo.
+              </p>
+              <Button
+                size="sm"
+                variant={turningDeco ? "primary" : "ghost"}
+                onClick={() => {
+                  setTurningDeco((v) => !v);
+                  setNote(
+                    turningDeco
+                      ? "Pincel de volta: clicar coloca e remove decoração."
+                      : "Girar objeto armado: cada clique numa decoração vira ela 60°, com toda a área junto. Seis cliques voltam ao original.",
+                  );
+                }}
+                title="Gira a decoração 60° por clique. Uma que ocupa vários hexes gira a área inteira de uma vez — um hexágono cai sobre si mesmo a cada 60°, então essas são as únicas voltas que ainda caem em casas reais."
+              >
+                {turningDeco ? "Girando — clique numa decoração" : "Girar objeto"}
+              </Button>
+            </div>
             <div className="flex flex-wrap gap-1.5">
               {decorOptions.map((dec) => (
                 <button

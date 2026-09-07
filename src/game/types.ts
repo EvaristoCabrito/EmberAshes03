@@ -188,6 +188,10 @@ export interface DecorationPlacement {
   id: string;
   x: number;
   y: number;
+  /** How far the prop is turned, in sixths of a circle (0-5). A hexagon maps onto itself
+   * every 60 degrees, so those are the only turns whose footprint still lands on real
+   * hexes. Optional: a map saved before props could turn has no such key, read as 0. */
+  rot?: number;
 }
 
 export interface Mission {
