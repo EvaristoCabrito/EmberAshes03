@@ -339,6 +339,15 @@ export function computeReachable(
   cols: number,
   rows: number,
   units: Unit[],
+  // Skip the final "can I actually stop here" pass — a cell can be a legal waypoint to walk
+  // through (mid-path, another unit standing on it doesn't block passing by) without being a
+  // legal place to end movement, so that pass prunes those from the returned map. Pass false
+  // only when reconstructing a walk path whose destination is already known-valid by other
+  // means (see BattleEngine.commitMove's animation reach): pruning deletes the pass-through
+  // cell but leaves any OTHER cell's parent pointer still referencing it, so a path that
+  // legitimately routes through one silently truncates at the dangling reference instead of
+  // reaching its real destination.
+  pruneStopPoints = true,
 ): Map<string, ReachCell> {
   const occ = occupancy(units);
   const size = unitSize(unit);
@@ -365,6 +374,7 @@ export function computeReachable(
     }
   }
 
+  if (!pruneStopPoints) return result;
   for (const [k, cell] of result) {
     if (k === key(unit.x, unit.y)) continue;
     if (footprintCost(cell.x, cell.y, size, tiles, cols, rows, occ, unit, true) == null) {

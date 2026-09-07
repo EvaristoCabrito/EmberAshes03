@@ -6,7 +6,7 @@ import { installAudioUnlock, playFile, playMenuMusic, playTheme, resumeAudio, se
 import { BattleCanvas } from "./BattleCanvas";
 import { InnScreen } from "./InnScreen";
 import { BackpackScreen, PaperDollScreen } from "./InventoryScreens";
-import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, CURE_DISEASE, CURES, DECORATIONS, DOUBLE_STRIKE, EQUIPMENT, EXP_TO_LEVEL, FIREBALL, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, MAGIC_MISSILE, PIERCING, PIERCING_THRUST, MAX_LEVEL, POTIONS, POTION_LOOT_WEIGHT, PROMOTE_LEVEL, PROMOTED_BASE, PROMOTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, TERRAIN, WEAPONS, WEAPON_MAX_ENH, WEB_OF_DREAMS, BAG_MAX, LOCKPICK_PRICE, POTION_CARRY_MAX, POTION_PRICE, barricadeDecor, decorationCells, placedFootprint, decorationImage, diceFormula, emberForKill, enemyLevelFor, equippedPouchId, fireballFormula, lightningFormula, dressMap, isSummonClass, MUSIC_TRACKS, SUMMON_CLASSES, parseLayout, potionLabel, pouchIcon, rangeLabel, sheetLine, spellFormula, spellTier, startingBags, statsFor, terrainNote, tierKey, tierUses, weaponEnhCost, weaponSellValue, type SpellTier } from "./data";
+import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, cleaveFormula, CURE_DISEASE, CURES, DECORATIONS, DOUBLE_STRIKE, doubleStrikeFormula, EQUIPMENT, EXP_TO_LEVEL, FIREBALL, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, longShotFormula, MAGIC_MISSILE, PIERCING, piercingMul, PIERCING_THRUST, MAX_LEVEL, POTIONS, POTION_LOOT_WEIGHT, PROMOTE_LEVEL, PROMOTED_BASE, PROMOTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, TERRAIN, WEAPONS, WEAPON_MAX_ENH, WEB_OF_DREAMS, BAG_MAX, LOCKPICK_PRICE, POTION_CARRY_MAX, POTION_PRICE, barricadeDecor, decorationCells, placedFootprint, decorationImage, diceFormula, emberForKill, enemyLevelFor, equippedPouchId, fireballFormula, lightningFormula, dressMap, isSummonClass, MUSIC_TRACKS, SUMMON_CLASSES, parseLayout, potionLabel, pouchIcon, rangeLabel, sheetLine, spellFormula, spellTier, startingBags, statsFor, terrainNote, tierKey, tierUses, weaponEnhCost, weaponSellValue, type SpellTier } from "./data";
 import { BattleEngine } from "./engine";
 import { WorldMapScreen } from "./WorldMapScreen";
 import { DISPLAY_VERSION } from "./version";
@@ -980,11 +980,17 @@ export function GameApp() {
               setScreen("mapEditor");
               return;
             }
-            // Reopens the world map straight onto this mission's location — if that
-            // location has more chapters left, its list pops open immediately (a
-            // multi-mission location plays as one continuous series of combats instead
-            // of dropping back to the bare map after every fight).
-            setOpenLocationOnMap(locationForMission(mission.id)?.id ?? null);
+            // Recomputed rather than read off save.completed directly — testMode never
+            // persists, so save.completed wouldn't yet include this mission there.
+            const completed = save.completed.includes(mission.id) ? save.completed : [...save.completed, mission.id];
+            const loc = locationForMission(mission.id);
+            const scenarioDone = !loc || loc.missionIds.every((id) => completed.includes(id));
+            // Mid-scenario: reopen the world map straight onto this mission's location so
+            // its list pops open immediately — a multi-mission location plays as one
+            // continuous series of combats instead of dropping back to the bare map after
+            // every fight. Once the whole scenario is done, leave no location open — the
+            // map's own centerLocationId already re-centers on wherever's next.
+            setOpenLocationOnMap(scenarioDone ? null : (loc?.id ?? null));
             setScreen("worldMap");
           }}
           mapLabel={customMission ? "Voltar ao editor" : "Mapa"}
@@ -1246,39 +1252,92 @@ const POTION_LOOT_TOTAL = POTION_LOOT_ROWS.reduce((n, r) => n + r.weight, 0);
  *
  * The scaling ones take MAG rather than level: a spell weights the caster's own power now
  * instead of growing on a table of its own. */
-const SKILL_DAMAGE_ROWS: { name: string; tier: SpellTier; formula: string | ((mag: number) => string); note: string }[] = [
-  { name: MAGIC_MISSILE.name, tier: spellTier("magicMissile")!, formula: (mag: number) => spellFormula(mag, MAGIC_MISSILE.mul, MAGIC_MISSILE.dice, MAGIC_MISSILE.faces, MAGIC_MISSILE.bonus), note: "Nunca erra. 1 míssil, 2 no nível 3, 3 no nível 6 — um alvo cada." },
-  { name: LONG_SHOT.name, tier: spellTier("longShot")!, formula: `arma +${diceFormula(LONG_SHOT.bonusDice, LONG_SHOT.bonusFaces, LONG_SHOT.bonus)}`, note: `Alcance ×${LONG_SHOT.rangeMul}+${LONG_SHOT.rangeBonus}.` },
-  { name: CURES.cureMinor.name, tier: spellTier("cureMinor")!, formula: `${diceFormula(CURES.cureMinor.dice, CURES.cureMinor.faces, CURES.cureMinor.bonus)} (cura)`, note: "—" },
-  { name: DOUBLE_STRIKE.name, tier: spellTier("doubleStrike")!, formula: "2× dano de arma", note: "Ataca duas vezes." },
-  { name: PIERCING_THRUST.name, tier: spellTier("piercingThrust")!, formula: `dano de arma, −${Math.round(PIERCING_THRUST.armorIgnore * 100)}% armadura`, note: "Acerta em linha; o segundo alvo recebe metade." },
-  { name: SUMMON_FAMILIAR.name, tier: spellTier("summonFamiliar")!, formula: "—", note: `Invoca aliado com ${Math.round(SUMMON_FAMILIAR.statScale * 100)}% dos atributos atuais.` },
+/** Which base class a skill belongs to — inverted from classSpells (promoted classes keep
+ * their base class's list, so this only ever needs the six base owners). */
+const SKILL_CLASS: Partial<Record<SpellKind, ClassId>> = {
+  doubleStrike: "swordsman",
+  cleave: "swordsman",
+  magicMissile: "mage",
+  lightning: "mage",
+  fireball: "mage",
+  causticVenom: "mage",
+  summonFamiliar: "conjurer",
+  webOfDreams: "conjurer",
+  longShot: "archer",
+  piercing: "archer",
+  cureMinor: "healer",
+  cureWounds: "healer",
+  cureDisease: "healer",
+  piercingThrust: "lancer",
+  sweep: "lancer",
+  trip: "lancer",
+};
+
+const SKILL_DAMAGE_ROWS: { name: string; cls: ClassId; tier: SpellTier; formula: string | ((x: number) => string); param?: "level"; note: string }[] = [
+  { name: MAGIC_MISSILE.name, cls: SKILL_CLASS.magicMissile!, tier: spellTier("magicMissile")!, formula: (mag: number) => spellFormula(mag, MAGIC_MISSILE.mul, MAGIC_MISSILE.dice, MAGIC_MISSILE.faces, MAGIC_MISSILE.bonus), note: "Nunca erra. 1 míssil, 2 no nível 3, 3 no nível 6 — um alvo cada." },
+  {
+    name: LONG_SHOT.name,
+    cls: SKILL_CLASS.longShot!,
+    tier: spellTier("longShot")!,
+    formula: (level: number) => longShotFormula(level),
+    param: "level" as const,
+    note: `Alcance ×${LONG_SHOT.rangeMul}+${LONG_SHOT.rangeBonus}. Dado sobe em níveis 2,3,5,7,9,12,14.`,
+  },
+  { name: CURES.cureMinor.name, cls: SKILL_CLASS.cureMinor!, tier: spellTier("cureMinor")!, formula: `${diceFormula(CURES.cureMinor.dice, CURES.cureMinor.faces, CURES.cureMinor.bonus)} (cura)`, note: "—" },
+  {
+    name: DOUBLE_STRIKE.name,
+    cls: SKILL_CLASS.doubleStrike!,
+    tier: spellTier("doubleStrike")!,
+    formula: (level: number) => doubleStrikeFormula(level),
+    param: "level" as const,
+    note: "Ataca duas vezes; cada acerto rola seu próprio bônus (não acumula).",
+  },
+  { name: PIERCING_THRUST.name, cls: SKILL_CLASS.piercingThrust!, tier: spellTier("piercingThrust")!, formula: `dano de arma, −${Math.round(PIERCING_THRUST.armorIgnore * 100)}% armadura`, note: "Acerta em linha; o segundo alvo recebe metade." },
+  { name: SUMMON_FAMILIAR.name, cls: SKILL_CLASS.summonFamiliar!, tier: spellTier("summonFamiliar")!, formula: "—", note: `Invoca aliado com ${Math.round(SUMMON_FAMILIAR.statScale * 100)}% dos atributos atuais.` },
   {
     name: LIGHTNING.name,
+    cls: SKILL_CLASS.lightning!,
     tier: spellTier("lightning")!,
     formula: (mag: number) => lightningFormula(mag),
     note: `Eco em outro alvo adjacente: ${diceFormula(LIGHTNING.echoDice, LIGHTNING.echoFaces, LIGHTNING.echoBonus)}.`,
   },
-  { name: PIERCING.name, tier: spellTier("piercing")!, formula: `${PIERCING.dmgMul}× dano de arma`, note: "—" },
-  { name: CURES.cureWounds.name, tier: spellTier("cureWounds")!, formula: `${diceFormula(CURES.cureWounds.dice, CURES.cureWounds.faces, CURES.cureWounds.bonus)} (cura)`, note: "—" },
-  { name: CLEAVE.name, tier: spellTier("cleave")!, formula: `arma +${diceFormula(CLEAVE.bonusDice, CLEAVE.bonusFaces, CLEAVE.bonusBonus)}`, note: `Atinge até ${CLEAVE.hexes} hexes.` },
-  { name: SWEEP.name, tier: spellTier("sweep")!, formula: "dano de arma", note: `Todos os inimigos adjacentes; empurra ${SWEEP.knockback} hex.` },
+  {
+    name: PIERCING.name,
+    cls: SKILL_CLASS.piercing!,
+    tier: spellTier("piercing")!,
+    formula: (level: number) => `${piercingMul(level)}× dano de arma`,
+    param: "level" as const,
+    note: "Multiplicador sobe nos níveis 6, 10 e 13.",
+  },
+  { name: CURES.cureWounds.name, cls: SKILL_CLASS.cureWounds!, tier: spellTier("cureWounds")!, formula: `${diceFormula(CURES.cureWounds.dice, CURES.cureWounds.faces, CURES.cureWounds.bonus)} (cura)`, note: "—" },
+  {
+    name: CLEAVE.name,
+    cls: SKILL_CLASS.cleave!,
+    tier: spellTier("cleave")!,
+    formula: (level: number) => cleaveFormula(level),
+    param: "level" as const,
+    note: `Atinge até ${CLEAVE.hexes} hexes. Dado sobe nos níveis 9, 11 e 14.`,
+  },
+  { name: SWEEP.name, cls: SKILL_CLASS.sweep!, tier: spellTier("sweep")!, formula: "dano de arma", note: `Todos os inimigos adjacentes; empurra ${SWEEP.knockback} hex.` },
   {
     name: WEB_OF_DREAMS.name,
+    cls: SKILL_CLASS.webOfDreams!,
     tier: spellTier("webOfDreams")!,
     formula: "—",
     note: `${Math.round(WEB_OF_DREAMS.sleepChance * 100)}% de dormir por ${diceFormula(WEB_OF_DREAMS.sleepDice, WEB_OF_DREAMS.sleepFaces, 0)} turnos (+${Math.round(WEB_OF_DREAMS.sleepBonusDamage * 100)}% dano ao acordar); prende o movimento a 1 hex na área por ${WEB_OF_DREAMS.durationRounds} turnos.`,
   },
-  { name: TRIP.name, tier: spellTier("trip")!, formula: `arma +${diceFormula(1, TRIP.bonusFaces, TRIP.bonusBonus)}`, note: `Atordoa ${TRIP.stunRounds} turnos; −${Math.round(TRIP.statPenalty * 100)}% de status pro resto da batalha.` },
+  { name: TRIP.name, cls: SKILL_CLASS.trip!, tier: spellTier("trip")!, formula: `arma +${diceFormula(1, TRIP.bonusFaces, TRIP.bonusBonus)}`, note: `Atordoa ${TRIP.stunRounds} turnos; −${Math.round(TRIP.statPenalty * 100)}% de status pro resto da batalha.` },
   {
     name: FIREBALL.name,
+    cls: SKILL_CLASS.fireball!,
     tier: spellTier("fireball")!,
     formula: (mag: number) => fireballFormula(mag),
     note: `Área de raio ${FIREBALL.size}.`,
   },
-  { name: CURE_DISEASE.name, tier: spellTier("cureDisease")!, formula: "—", note: "Cura doença." },
+  { name: CURE_DISEASE.name, cls: SKILL_CLASS.cureDisease!, tier: spellTier("cureDisease")!, formula: "—", note: "Cura doença." },
   {
     name: CAUSTIC_VENOM.name,
+    cls: SKILL_CLASS.causticVenom!,
     tier: spellTier("causticVenom")!,
     formula: (mag: number) =>
       `centro ${spellFormula(mag, CAUSTIC_VENOM.centerMul, CAUSTIC_VENOM.centerDice, CAUSTIC_VENOM.centerFaces, CAUSTIC_VENOM.centerBonus)} · respingo ${spellFormula(mag, CAUSTIC_VENOM.splashMul, CAUSTIC_VENOM.splashDice, CAUSTIC_VENOM.splashFaces, CAUSTIC_VENOM.splashBonus)}`,
@@ -1290,7 +1349,7 @@ function HelpModal({ onClose }: { onClose: () => void }) {
   const [tab, setTab] = useState<"basicos" | "tabelas" | "loot" | "dano">("basicos");
   return (
     <div className="absolute inset-0 z-20 bg-bg/80 flex items-end sm:items-center justify-center p-4">
-      <div className="w-full max-w-md max-h-[85dvh] overflow-y-auto bg-surface border border-border rounded-xl p-6">
+      <div className="w-full max-w-lg max-h-[85dvh] overflow-y-auto bg-surface border border-border rounded-xl p-6">
         <div className="flex items-start justify-between gap-4 mb-4">
           <h2 className="font-display text-2xl">Como jogar</h2>
           <button type="button" onClick={onClose} className="size-11 grid place-items-center" aria-label="Fechar">
@@ -1401,6 +1460,7 @@ function HelpModal({ onClose }: { onClose: () => void }) {
                 <thead>
                   <tr className="text-muted">
                     <th className="text-left font-normal pr-2 py-1">Habilidade</th>
+                    <th className="text-left font-normal px-1.5 py-1">Classe</th>
                     <th className="text-center font-normal px-1.5 py-1">Tier</th>
                     <th className="text-left font-normal px-1.5 py-1">Fórmula</th>
                     <th className="text-left font-normal pl-1.5 py-1">Efeito</th>
@@ -1410,10 +1470,17 @@ function HelpModal({ onClose }: { onClose: () => void }) {
                   {SKILL_DAMAGE_ROWS.map((row) => (
                     <tr key={row.name} className="border-t border-border/60 align-top">
                       <td className="text-left py-1 pr-2 font-medium whitespace-nowrap">{row.name}</td>
+                      <td className="text-left px-1.5 py-1 text-muted whitespace-nowrap">{CLASSES[row.cls].name}</td>
                       <td className="text-center px-1.5 py-1 text-muted">T{row.tier}</td>
                       <td className="text-left px-1.5 py-1 tabular-nums">
                         {typeof row.formula === "string" ? (
                           row.formula
+                        ) : row.param === "level" ? (
+                          <span className="space-x-1.5">
+                            <span>Nv1: {row.formula(1)}</span>
+                            <span className="text-muted">· Nv7: {row.formula(7)}</span>
+                            <span className="text-muted">· Nv14: {row.formula(14)}</span>
+                          </span>
                         ) : (
                           <span className="space-x-1.5">
                             <span>MAG 10: {row.formula(10)}</span>
@@ -4191,13 +4258,14 @@ function StatusPanel({ unit, bagIcon, onClose, onOpenInventory, onOpenEquipment 
                       <div className="flex items-center gap-1.5 bg-bg border border-border rounded-md px-2 py-1.5">
                         <img src="/game/icons/cleave.png?v=ds2" alt="" className="size-5 rounded-sm object-cover shrink-0" />
                         <p className="text-xs truncate">
-                          {DOUBLE_STRIKE.name} <span className="tabular-nums text-muted">×{unit.spells[tierKey(spellTier("doubleStrike")!)]}</span>
+                          {DOUBLE_STRIKE.name} {doubleStrikeFormula(unit.level)}{" "}
+                          <span className="tabular-nums text-muted">×{unit.spells[tierKey(spellTier("doubleStrike")!)]}</span>
                         </p>
                       </div>
                       <div className="flex items-center gap-1.5 bg-bg border border-border rounded-md px-2 py-1.5">
                         <img src="/game/icons/cleave-crossed-blades.png?v=ds2" alt="" className="size-5 rounded-sm object-cover shrink-0" />
                         <p className="text-xs truncate">
-                          {CLEAVE.name} {CLEAVE.hexes} hex, arma + {diceFormula(CLEAVE.bonusDice, CLEAVE.bonusFaces, CLEAVE.bonusBonus)}{" "}
+                          {CLEAVE.name} {CLEAVE.hexes} hex, {cleaveFormula(unit.level)}{" "}
                           <span className="tabular-nums text-muted">×{unit.spells[tierKey(spellTier("cleave")!)]}</span>
                         </p>
                       </div>

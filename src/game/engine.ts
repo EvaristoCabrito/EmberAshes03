@@ -1,4 +1,4 @@
-import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, CURE_DISEASE, CURES, DECORATIONS, DISEASE, DOUBLE_STRIKE, EMPTY_BAG, EQUIPMENT, EXP_TO_LEVEL, expForHit, FIREBALL, FOOTPRINT_TYPE_7, FOOTPRINT_TYPE_8, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, MAGIC_MISSILE, magicMissileCount, MAX_LEVEL, PIERCING, PIERCING_THRUST, POTION_CARRY_MAX, POTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, WEAPON_MAX_ENH, WEAPONS, WEB_OF_DREAMS, cureSpan, barricadeDecor, decorationCells, decorationFacing, decorationImage, diceFormula, effectiveMaxRange, enemyLevelFor, fireballFormula, fireballOrigin, fireballPower, fireballRangeTiles, fireballTiles, hexAreaTiles, isProjectile, isSummonClass, lightningDice, lightningFormula, missionGearLevel, parseLayout, placedFootprint, potionLabel, rollCure, rollDice, rollPotion, spellFormula, spellTier, starterWeaponFor, STARTING_BAG, statsFor, terrainNote, TERRAIN, tierKey, tierUses, gearStatBonus, offHandBlocked, weaponRoll, weightedLootPick, weightedPotionPick, weightedWeaponPick } from "./data";
+import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, cleaveFormula, cleavePower, CURE_DISEASE, CURES, DECORATIONS, DISEASE, DOUBLE_STRIKE, doubleStrikeFormula, doubleStrikePower, EMPTY_BAG, EQUIPMENT, EXP_TO_LEVEL, expForHit, FIREBALL, FOOTPRINT_TYPE_7, FOOTPRINT_TYPE_8, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, longShotFormula, longShotPower, MAGIC_MISSILE, magicMissileCount, MAX_LEVEL, PIERCING, piercingMul, PIERCING_THRUST, POTION_CARRY_MAX, POTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, WEAPON_MAX_ENH, WEAPONS, WEB_OF_DREAMS, cureSpan, barricadeDecor, decorationCells, decorationFacing, decorationImage, diceFormula, effectiveMaxRange, enemyLevelFor, fireballFormula, fireballOrigin, fireballPower, fireballRangeTiles, fireballTiles, hexAreaTiles, isProjectile, isSummonClass, lightningDice, lightningFormula, missionGearLevel, parseLayout, placedFootprint, potionLabel, rollCure, rollDice, rollPotion, spellFormula, spellTier, starterWeaponFor, STARTING_BAG, statsFor, terrainNote, TERRAIN, tierKey, tierUses, gearStatBonus, offHandBlocked, weaponRoll, weightedLootPick, weightedPotionPick, weightedWeaponPick } from "./data";
 import type { SpellTier } from "./data";
 import { canCounter, makeForecast, mulberry32, powerOf, protOf, rollDamage, rollDamageCustom } from "./combat";
 import {
@@ -101,7 +101,11 @@ type Seq =
       type: "combat";
       att: string;
       def: string;
+      /** A single extra die (bonusDice = faces, bonusFlat = flat add) rolled on top of the
+       * attacker's own strike. bonusDiceCount is how many of that die to roll — defaults to
+       * 1 (Trip's single d8), Double Strike's higher tiers roll 2. */
       bonusDice?: number;
+      bonusDiceCount?: number;
       bonusFlat?: number;
       noCounter?: boolean;
       spellKind?: SpellKind;
@@ -137,6 +141,7 @@ interface CombatAnim {
   t: number;
   swapped: boolean;
   bonusDice: number;
+  bonusDiceCount: number;
   bonusFlat: number;
   noCounter: boolean;
   spellKind: SpellKind | null;
@@ -818,6 +823,7 @@ export class BattleEngine {
         t: 0,
         swapped: false,
         bonusDice: step.bonusDice ?? 0,
+        bonusDiceCount: step.bonusDiceCount ?? 1,
         bonusFlat: step.bonusFlat ?? 0,
         noCounter: step.noCounter ?? false,
         spellKind: step.spellKind ?? null,
@@ -975,7 +981,7 @@ export class BattleEngine {
             ? rollDamageCustom(actor, target, attTile, defTile, a.customDice.dice, a.customDice.faces, a.customDice.bonus, this.rng)
             : rollDamage(actor, target, attTile, defTile, this.rng);
         if (a.stage === "hit" && a.bonusDice > 0) {
-          hit.dmg += rollDice(1, a.bonusDice, a.bonusFlat, this.rng);
+          hit.dmg += rollDice(a.bonusDiceCount, a.bonusDice, a.bonusFlat, this.rng);
         }
         if (a.stage === "hit" && a.dmgMul !== 1) {
           hit.dmg = Math.max(1, Math.floor(hit.dmg * a.dmgMul));
@@ -997,10 +1003,7 @@ export class BattleEngine {
         // damage but grants none, or a unit that gets ganged up on levels for free just by
         // standing there and countering every hit.
         if (target.side !== actor.side && a.stage === "hit") {
-          // Long Shot finishing the target off also doubles the kill's XP, same as a
-          // non-AoE Mage/Conjurer spell kill (see stepSpell).
-          const killBonus = target.hp <= 0 && a.spellKind === "longShot" ? 2 : 1;
-          this.gainExp(actor, target.level, hit.dmg, killBonus);
+          this.gainExp(actor, target.level, hit.dmg, 1);
         }
         this.spawnHit(target, hit.dmg, hit.crit);
         this.pushLog(`${actor.name} atacou ${target.name}: ${hit.dmg} dano${hit.crit ? " (crítico)" : ""}`);
@@ -1165,8 +1168,10 @@ export class BattleEngine {
         // line, which must never grant XP.
         if (foe.side !== att.side) {
           // Black Mage / Conjurer finishing an enemy off with one of their own single-target
-          // spells (Magic Missile, Lightning) doubles the XP from that kill — never for AoE/line
-          // spells, where only the first enemy hit grants full XP and the rest grant half.
+          // spells (Magic Missile, Lightning) doubles the XP from that kill, same as Long
+          // Shot (moved onto this same "spell" step so its weapon+dice bonus can scale by
+          // level) — never for AoE/line spells, where only the first enemy hit grants full
+          // XP and the rest grant half.
           const isAoeSpell =
             a.spellKind === "fireball" ||
             a.spellKind === "cleave" ||
@@ -1175,7 +1180,7 @@ export class BattleEngine {
             a.spellKind === "piercingThrust" ||
             a.spellKind === "sweep";
           const xpMul =
-            foe.hp <= 0 && !isAoeSpell && (att.classId === "mage" || att.classId === "conjurer")
+            foe.hp <= 0 && !isAoeSpell && (att.classId === "mage" || att.classId === "conjurer" || a.spellKind === "longShot")
               ? 2
               : isAoeSpell && !firstAoeEnemyHit
                 ? 0.5
@@ -1889,7 +1894,7 @@ export class BattleEngine {
     this.spellArmed = false;
     this.spellAim = null;
     this.hover = null;
-    this.tip = `${LONG_SHOT.name}: alcance ${u.minRange}–${this.longMax(u)}, AT − DF + ${diceFormula(LONG_SHOT.bonusDice, LONG_SHOT.bonusFaces, LONG_SHOT.bonus)}. Toque no inimigo.`;
+    this.tip = `${LONG_SHOT.name}: alcance ${u.minRange}–${this.longMax(u)}, ${longShotFormula(u.level)} − DF. Toque no inimigo.`;
     sfxPlay.ui();
   }
 
@@ -1901,7 +1906,7 @@ export class BattleEngine {
     this.spellArmed = false;
     this.spellAim = null;
     this.hover = null;
-    this.tip = `${PIERCING.name}: reta da colmeia. Dobro do AT − DF em cada um na linha, aliado ou inimigo.`;
+    this.tip = `${PIERCING.name}: reta da colmeia. ${piercingMul(u.level)}× do AT − DF em cada um na linha, aliado ou inimigo.`;
     sfxPlay.ui();
   }
 
@@ -1938,7 +1943,7 @@ export class BattleEngine {
     this.spellArmed = false;
     this.spellAim = null;
     this.hover = null;
-    this.tip = `${DOUBLE_STRIKE.name}: ataca duas vezes com o dano normal da arma. Toque no inimigo.`;
+    this.tip = `${DOUBLE_STRIKE.name}: ataca duas vezes, ${doubleStrikeFormula(u.level)}. Toque no inimigo.`;
     sfxPlay.ui();
   }
 
@@ -1950,7 +1955,7 @@ export class BattleEngine {
     this.spellArmed = false;
     this.spellAim = null;
     this.hover = null;
-    this.tip = `${CLEAVE.name}: ${CLEAVE.hexes} hexes adjacentes, dano da arma + ${diceFormula(CLEAVE.bonusDice, CLEAVE.bonusFaces, CLEAVE.bonusBonus)}. Toque num hex vizinho.`;
+    this.tip = `${CLEAVE.name}: ${CLEAVE.hexes} hexes adjacentes, ${cleaveFormula(u.level)}. Toque num hex vizinho.`;
     sfxPlay.ui();
   }
 
@@ -2142,26 +2147,34 @@ export class BattleEngine {
     return this.webZones.some((z) => z.cells.has(key(x, y)));
   }
 
-  /** Every reach computation for a unit's own turn — including every re-derive free
-   * repositioning does after each move — funnels through here, so both of its clamps stay
-   * correct no matter how many times the player changes their mind about where to end up:
+  /** Every reach computation for a player unit's own turn — including every re-derive free
+   * repositioning does after each move — funnels through here.
    *
-   * 1. Web of Dreams' "restrained / difficult terrain" clause: a unit whose current cell was
-   *    webbed at the START of its turn (this.turnRestrained, decided once in beginUnitTurn,
-   *    not re-checked live — see the old note this replaced) gets mov clamped to 1.
-   * 2. moveBudgetUsed: free repositioning recomputes reach fresh from wherever the unit
-   *    currently stands, which — with the unit's real, full mov every time — would hand back
-   *    a fresh movement budget on every single move and let a unit hop across the whole map
-   *    in one turn. Subtracting what's already been spent (see commitMove) caps the turn's
-   *    real total distance at mov, same as it's always meant to be; the player still gets to
-   *    freely change their mind about WHERE within that budget to land, no clunky cancel/
-   *    reselect needed — that part is the actual point of free repositioning and stays.
+   * Reach is measured from this.turnStart, the tile the turn actually began on, not from
+   * wherever a prior reposition physically walked the unit to. An earlier version measured
+   * it from the unit's current position and subtracted moveBudgetUsed (cumulative cost spent
+   * so far), which capped total distance correctly but meant every reposition permanently
+   * spent part of the budget: a player who moved once to scout, then wanted to go somewhere
+   * else, could find themselves without enough left to reach a tile that was available a
+   * moment ago — stuck with whatever the exploratory move happened to leave them, on top of
+   * whatever canUndoMove/undoMove already covers (a full manual rewind, not automatic).
+   * Anchoring at the fixed start tile instead means every cell within mov of THAT tile stays
+   * selectable for the whole turn, as many times as the player changes their mind, with no
+   * shrinking budget and no way to strand yourself. (The walk animation itself still plays
+   * from wherever the unit is currently standing — see commitMove — this only governs which
+   * cells are valid to pick.)
    *
-   * Both clamps use the same "shallow clone with one derived stat overridden" trick Piercing
-   * Thrust's armor-ignore calc uses — the real Unit's own mov is never touched. */
-  /** Movement this unit has left this turn — the same figure effectiveUnitForReach grants
-   * it, surfaced so the panel counts down as the unit walks. The board already shrank its
-   * reach hex by hex; only the number was frozen at the untouched base all turn.
+   * Enemy AI turns never set this.turnStart (see beginUnitTurn) and don't reposition, so
+   * they fall through to the unit's own live x/y, unaffected by any of this.
+   *
+   * Web of Dreams' "restrained / difficult terrain" clause — a unit whose current cell was
+   * webbed at the START of its turn (this.turnRestrained, decided once in beginUnitTurn, not
+   * re-checked live) gets mov clamped to 1 — applies on top, for both sides. */
+  /** Movement this unit has left this turn, off the same cumulative moveBudgetUsed
+   * commitMove tracks — still meaningful as "how far you've walked" even though reach
+   * itself no longer shrinks with it (see effectiveUnitForReach): it's what decides when an
+   * already-acted unit's turn auto-ends (see commitMove), and it's what the panel counts
+   * down as the unit walks.
    *
    * The restrained clamp applies to whoever's turn it actually is and nobody else:
    * turnRestrained is decided once, in beginUnitTurn, for the active unit, and says nothing
@@ -2172,8 +2185,10 @@ export class BattleEngine {
   }
 
   private effectiveUnitForReach(u: Unit): Unit {
-    const remaining = Math.max(0, u.mov - u.moveBudgetUsed);
-    const cap = this.turnRestrained ? Math.min(remaining, 1) : remaining;
+    const cap = this.turnRestrained ? 1 : u.mov;
+    if (u.side === "player" && this.turnStart) {
+      return { ...u, x: this.turnStart.x, y: this.turnStart.y, mov: cap };
+    }
     return cap === u.mov ? u : { ...u, mov: cap };
   }
 
@@ -2378,12 +2393,16 @@ export class BattleEngine {
     this.missileTargets = [];
     this.tip = null;
     this.mode = "locked";
+    const power = longShotPower(unit.level);
     this.queue.push({
-      type: "combat",
+      type: "spell",
       att: unit.id,
-      def: foe.id,
-      bonusDice: LONG_SHOT.bonusFaces,
-      bonusFlat: LONG_SHOT.bonus,
+      tiles: [cell],
+      ids: [foe.id],
+      label: LONG_SHOT.name,
+      weaponBonusDice: power.dice,
+      weaponBonusFaces: power.faces,
+      weaponBonusBonus: 0,
       spellKind: "longShot",
     });
   }
@@ -2405,7 +2424,7 @@ export class BattleEngine {
     this.missileTargets = [];
     this.tip = null;
     this.mode = "locked";
-    this.queue.push({ type: "spell", att: unit.id, tiles: line, ids, label: PIERCING.name, dmgMul: PIERCING.dmgMul, spellKind: "piercing" });
+    this.queue.push({ type: "spell", att: unit.id, tiles: line, ids, label: PIERCING.name, dmgMul: piercingMul(unit.level), spellKind: "piercing" });
   }
 
   private castPiercingThrust(unit: Unit, cell: Point): void {
@@ -2518,8 +2537,12 @@ export class BattleEngine {
     this.missileTargets = [];
     this.tip = null;
     this.mode = "locked";
-    this.queue.push({ type: "combat", att: unit.id, def: foe.id, noCounter: true });
-    this.queue.push({ type: "combat", att: unit.id, def: foe.id });
+    // Rolled fresh for each hit (see doubleStrikePower) — it does not stack across the two
+    // strikes, each just gets its own independent roll of the current tier.
+    const power = doubleStrikePower(unit.level);
+    const bonus = power.dice > 0 ? { bonusDice: power.faces, bonusDiceCount: power.dice, bonusFlat: 0 } : {};
+    this.queue.push({ type: "combat", att: unit.id, def: foe.id, noCounter: true, ...bonus });
+    this.queue.push({ type: "combat", att: unit.id, def: foe.id, ...bonus });
   }
 
   private castTrip(unit: Unit, cell: Point): void {
@@ -2696,15 +2719,16 @@ export class BattleEngine {
     this.missileTargets = [];
     this.tip = null;
     this.mode = "locked";
+    const power = cleavePower(unit.level);
     this.queue.push({
       type: "spell",
       att: unit.id,
       tiles,
       ids,
       label: CLEAVE.name,
-      weaponBonusDice: CLEAVE.bonusDice,
-      weaponBonusFaces: CLEAVE.bonusFaces,
-      weaponBonusBonus: CLEAVE.bonusBonus,
+      weaponBonusDice: power.dice,
+      weaponBonusFaces: power.faces,
+      weaponBonusBonus: 0,
       spellKind: "cleave",
     });
   }
@@ -3269,13 +3293,27 @@ export class BattleEngine {
   }
 
   private commitMove(unit: Unit, to: Point, after?: () => void): void {
-    const path = reconstructPath(this.reach, to);
+    // this.reach is anchored at this.turnStart (see effectiveUnitForReach), not wherever the
+    // unit is actually standing right now — fine for validating `to` and for moveBudgetUsed
+    // bookkeeping below, but its parent pointers trace a path from the turn's starting tile,
+    // not from the unit's current one. On a first move those are the same tile; on a
+    // second-or-later reposition they aren't, so the walk needs its own path reconstructed
+    // from where the unit really stands. pruneStopPoints=false: that walk only needs SOME
+    // valid route, and the default pass deletes any cell along the way that isn't itself a
+    // legal place to stop (e.g. one an ally occupies) — leaving a dangling parent reference
+    // that silently truncates the path instead of reaching `to`.
+    const atTurnStart = !!this.turnStart && unit.x === this.turnStart.x && unit.y === this.turnStart.y;
+    const walkReach = atTurnStart
+      ? this.reach
+      : computeReachable({ ...unit, mov: this.cols + this.rows }, this.tiles, this.cols, this.rows, this.units, false);
+    const path = reconstructPath(walkReach, to);
     if (path.length === 0) path.push({ x: unit.x, y: unit.y }, to);
     // Cost of THIS move specifically (from wherever the unit currently stands, not from its
     // turn-start position) — captured now, off the reach map this move was picked from,
-    // before it gets cleared/recomputed below. Folded into moveBudgetUsed so a repositioning
-    // chain's total distance is capped at the unit's own mov (see effectiveUnitForReach),
-    // not re-granted a fresh budget on every hop.
+    // before it gets cleared/recomputed below. Folded into moveBudgetUsed, which still
+    // tracks cumulative distance since turnStart for movLeft's HUD figure and for deciding
+    // when an already-acted unit's turn auto-ends — effectiveUnitForReach just no longer
+    // uses it to shrink what's selectable.
     const stepCost = this.reach.get(key(to.x, to.y))?.cost ?? 0;
     this.mode = "locked";
     this.queue.push({ type: "move", id: unit.id, path });
@@ -3285,7 +3323,11 @@ export class BattleEngine {
       unit.y = Math.round(to.y);
       unit.drawX = unit.x;
       unit.drawY = unit.y;
-      unit.moveBudgetUsed += stepCost;
+      // stepCost is distance-from-turnStart (this.reach is turnStart-anchored, see
+      // effectiveUnitForReach), not a per-hop increment — moveBudgetUsed is set to it
+      // outright, not accumulated, or repositioning to a second cell as far from turnStart
+      // as the first would double-count instead of just replacing it.
+      unit.moveBudgetUsed = stepCost;
       // Having acted doesn't make this move the last one — it comes out of the same pool as
       // any other. The turn ends when the pool runs dry (with the action already spent),
       // never merely because the unit acted first.

@@ -1574,15 +1574,39 @@ export const LONG_SHOT = {
   name: "Tiro Longo",
   rangeMul: 2,
   rangeBonus: 1,
-  bonusDice: 1,
-  bonusFaces: 8,
-  bonus: 1,
 };
+
+/** Long Shot's bonus die, always added on top of plain weapon damage (never in place of
+ * it) — grows in explicit level breakpoints, same shape as Lightning/Fireball, rather than a
+ * smooth per-level formula. */
+export function longShotPower(level: number): { dice: number; faces: number } {
+  if (level >= 14) return { dice: 2, faces: 12 };
+  if (level >= 12) return { dice: 2, faces: 10 };
+  if (level >= 9) return { dice: 2, faces: 8 };
+  if (level >= 7) return { dice: 2, faces: 6 };
+  if (level >= 5) return { dice: 1, faces: 12 };
+  if (level >= 3) return { dice: 1, faces: 10 };
+  if (level >= 2) return { dice: 2, faces: 4 };
+  return { dice: 1, faces: 8 };
+}
+
+export function longShotFormula(level: number): string {
+  const p = longShotPower(level);
+  return `arma + ${diceFormula(p.dice, p.faces, 0)}`;
+}
 
 export const PIERCING = {
   name: "Tiro Perfurante",
-  dmgMul: 2,
 };
+
+/** Tiro Perfurante's weapon-damage multiplier — explicit level breakpoints, same shape as
+ * every other level-gated skill here rather than a smooth per-level formula. */
+export function piercingMul(level: number): number {
+  if (level >= 13) return 2.5;
+  if (level >= 10) return 2.25;
+  if (level >= 6) return 2;
+  return 1.5;
+}
 
 /** Lancer tier 1: a short-reach line thrust (weapon range + 1 hex) that ignores a slice of
  * the target's armor and hits everyone caught in the line — 1st target full damage, every
@@ -1614,13 +1638,45 @@ export const DOUBLE_STRIKE = {
   name: "Corte Duplo",
 };
 
+/** Corte Duplo's bonus die — rolled fresh on EACH of its two hits (it does not stack: the
+ * tiers replace each other, never add up, and landing both hits doesn't double a single
+ * roll — each hit gets its own independent roll of whatever the current tier is). No bonus
+ * at all until level 2. */
+export function doubleStrikePower(level: number): { dice: number; faces: number } {
+  if (level >= 14) return { dice: 2, faces: 8 };
+  if (level >= 13) return { dice: 2, faces: 6 };
+  if (level >= 11) return { dice: 1, faces: 12 };
+  if (level >= 9) return { dice: 1, faces: 10 };
+  if (level >= 7) return { dice: 2, faces: 4 };
+  if (level >= 5) return { dice: 1, faces: 8 };
+  if (level >= 3) return { dice: 1, faces: 6 };
+  if (level >= 2) return { dice: 1, faces: 4 };
+  return { dice: 0, faces: 0 };
+}
+
+export function doubleStrikeFormula(level: number): string {
+  const p = doubleStrikePower(level);
+  return p.dice > 0 ? `2× (arma + ${diceFormula(p.dice, p.faces, 0)})` : "2× dano de arma";
+}
+
 export const CLEAVE = {
   name: "Cleave",
   hexes: 3,
-  bonusDice: 1,
-  bonusFaces: 8,
-  bonusBonus: 2,
 };
+
+/** Cleave's bonus die, always added on top of plain weapon damage — explicit level
+ * breakpoints, same shape as Long Shot/Lightning/Fireball. */
+export function cleavePower(level: number): { dice: number; faces: number } {
+  if (level >= 14) return { dice: 2, faces: 8 };
+  if (level >= 11) return { dice: 2, faces: 6 };
+  if (level >= 9) return { dice: 2, faces: 4 };
+  return { dice: 1, faces: 8 };
+}
+
+export function cleaveFormula(level: number): string {
+  const p = cleavePower(level);
+  return `arma + ${diceFormula(p.dice, p.faces, 0)}`;
+}
 
 export const MAGIC_MISSILE = {
   name: "Míssil Mágico",
