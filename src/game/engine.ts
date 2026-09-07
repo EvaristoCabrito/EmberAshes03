@@ -2316,31 +2316,28 @@ export class BattleEngine {
   /** Every reach computation for a player unit's own turn — including every re-derive free
    * repositioning does after each move — funnels through here.
    *
-   * Reach is measured from this.turnStart, the tile the turn actually began on, not from
-   * wherever a prior reposition physically walked the unit to. An earlier version measured
-   * it from the unit's current position and subtracted moveBudgetUsed (cumulative cost spent
-   * so far), which capped total distance correctly but meant every reposition permanently
-   * spent part of the budget: a player who moved once to scout, then wanted to go somewhere
-   * else, could find themselves without enough left to reach a tile that was available a
-   * moment ago — stuck with whatever the exploratory move happened to leave them, on top of
-   * whatever canUndoMove/undoMove already covers (a full manual rewind, not automatic).
-   * Anchoring at the fixed start tile instead means every cell within mov of THAT tile stays
-   * selectable for the whole turn, as many times as the player changes their mind, with no
-   * shrinking budget and no way to strand yourself. (The walk animation itself still plays
-   * from wherever the unit is currently standing — see commitMove — this only governs which
-   * cells are valid to pick.)
+   * Reach is measured from wherever the unit is actually standing right now, capped by
+   * mov - moveBudgetUsed: movement is spent as you walk, cumulatively, exactly like the
+   * panel counts it down. A prior version anchored reach at this.turnStart with the full mov
+   * instead, meaning moveBudgetUsed measured distance-from-turnStart rather than distance
+   * walked — walk 3 hexes out and 3 back and it read 0 again, full budget restored, every
+   * cell within mov of the start tile re-selectable indefinitely. That's not a movement cap,
+   * it's a teleport with a leash. The real fix for "an exploratory move can strand you" was
+   * already sitting right here: canUndoMove/undoMove, a full manual rewind to turnStart for
+   * exactly a wrong click — never trade the cap itself away for that.
    *
-   * Enemy AI turns never set this.turnStart (see beginUnitTurn) and don't reposition, so
-   * they fall through to the unit's own live x/y, unaffected by any of this.
+   * Enemy AI turns never set this.turnStart and don't reposition, so they were never affected
+   * by the turnStart-anchoring either way — they've always read straight off their own live
+   * x/y, same as here.
    *
    * Web of Dreams' "restrained / difficult terrain" clause — a unit whose current cell was
    * webbed at the START of its turn (this.turnRestrained, decided once in beginUnitTurn, not
-   * re-checked live) gets mov clamped to 1 — applies on top, for both sides. */
+   * re-checked live) clamps mov to 1 — applies on top, for both sides. */
   /** Movement this unit has left this turn, off the same cumulative moveBudgetUsed
-   * commitMove tracks — still meaningful as "how far you've walked" even though reach
-   * itself no longer shrinks with it (see effectiveUnitForReach): it's what decides when an
-   * already-acted unit's turn auto-ends (see commitMove), and it's what the panel counts
-   * down as the unit walks.
+   * commitMove accumulates — how far it's actually walked. Reach (effectiveUnitForReach)
+   * shrinks with it too now, so this and what's selectable always agree. It's also what
+   * decides when an already-acted unit's turn auto-ends (see commitMove), and what the panel
+   * counts down as the unit walks.
    *
    * The restrained clamp applies to whoever's turn it actually is and nobody else:
    * turnRestrained is decided once, in beginUnitTurn, for the active unit, and says nothing
@@ -2351,10 +2348,8 @@ export class BattleEngine {
   }
 
   private effectiveUnitForReach(u: Unit): Unit {
-    const cap = this.turnRestrained ? 1 : u.mov;
-    if (u.side === "player" && this.turnStart) {
-      return { ...u, x: this.turnStart.x, y: this.turnStart.y, mov: cap };
-    }
+    const remaining = Math.max(0, u.mov - u.moveBudgetUsed);
+    const cap = this.turnRestrained ? Math.min(1, remaining) : remaining;
     return cap === u.mov ? u : { ...u, mov: cap };
   }
 
@@ -3641,27 +3636,17 @@ export class BattleEngine {
   }
 
   private commitMove(unit: Unit, to: Point, after?: () => void): void {
-    // this.reach is anchored at this.turnStart (see effectiveUnitForReach), not wherever the
-    // unit is actually standing right now — fine for validating `to` and for moveBudgetUsed
-    // bookkeeping below, but its parent pointers trace a path from the turn's starting tile,
-    // not from the unit's current one. On a first move those are the same tile; on a
-    // second-or-later reposition they aren't, so the walk needs its own path reconstructed
-    // from where the unit really stands. pruneStopPoints=false: that walk only needs SOME
-    // valid route, and the default pass deletes any cell along the way that isn't itself a
-    // legal place to stop (e.g. one an ally occupies) — leaving a dangling parent reference
-    // that silently truncates the path instead of reaching `to`.
-    const atTurnStart = !!this.turnStart && unit.x === this.turnStart.x && unit.y === this.turnStart.y;
-    const walkReach = atTurnStart
-      ? this.reach
-      : computeReachable({ ...unit, mov: this.cols + this.rows }, this.tiles, this.cols, this.rows, this.units, false);
+    // this.reach is anchored at the unit's live position (see effectiveUnitForReach) — right
+    // for validating `to` and reading its cost, but it's still the default pruneStopPoints
+    // pass, which deletes any cell along the way that isn't itself a legal place to stop
+    // (e.g. one an ally occupies), leaving a dangling parent reference that would silently
+    // truncate reconstructPath before it reaches `to`. The walk only needs SOME valid route
+    // through, so it gets its own unpruned pass off the same anchor.
+    const walkReach = computeReachable(this.effectiveUnitForReach(unit), this.tiles, this.cols, this.rows, this.units, false);
     const path = reconstructPath(walkReach, to);
     if (path.length === 0) path.push({ x: unit.x, y: unit.y }, to);
-    // Cost of THIS move specifically (from wherever the unit currently stands, not from its
-    // turn-start position) — captured now, off the reach map this move was picked from,
-    // before it gets cleared/recomputed below. Folded into moveBudgetUsed, which still
-    // tracks cumulative distance since turnStart for movLeft's HUD figure and for deciding
-    // when an already-acted unit's turn auto-ends — effectiveUnitForReach just no longer
-    // uses it to shrink what's selectable.
+    // Cost of THIS hop, from wherever the unit currently stands — this.reach is anchored
+    // there too, so this is already a per-hop delta, not a cumulative total.
     const stepCost = this.reach.get(key(to.x, to.y))?.cost ?? 0;
     this.mode = "locked";
     this.queue.push({ type: "move", id: unit.id, path });
@@ -3671,11 +3656,9 @@ export class BattleEngine {
       unit.y = Math.round(to.y);
       unit.drawX = unit.x;
       unit.drawY = unit.y;
-      // stepCost is distance-from-turnStart (this.reach is turnStart-anchored, see
-      // effectiveUnitForReach), not a per-hop increment — moveBudgetUsed is set to it
-      // outright, not accumulated, or repositioning to a second cell as far from turnStart
-      // as the first would double-count instead of just replacing it.
-      unit.moveBudgetUsed = stepCost;
+      // Accumulates: movement is spent as the unit walks, hop by hop, never refunded by a
+      // later move — only undoMove (a full rewind to turnStart) reverts spent movement.
+      unit.moveBudgetUsed += stepCost;
       // Having acted doesn't make this move the last one — it comes out of the same pool as
       // any other. The turn ends when the pool runs dry (with the action already spent),
       // never merely because the unit acted first.
